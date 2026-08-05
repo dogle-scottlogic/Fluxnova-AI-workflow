@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:agent="http://fluxnova.finos.org/schema/1.0/ai/agent" xmlns:modeler="http://fluxnova.finos.org/schema/modeler/1.0" id="Definitions_AgenticSubprocessExample" targetNamespace="http://fluxnova.finos.org/examples/agentic-subprocess" exporter="Fluxnova Modeler" exporterVersion="1.3.0-dev" modeler:executionPlatform="Fluxnova Platform" modeler:executionPlatformVersion="2.0.0">
+  <process id="loanAssessmentProcess" name="Loan Application Assessment" isExecutable="true" camunda:historyTimeToLive="180">
+    <startEvent id="StartEvent_ApplicationReceived" name="Loan Application&#10;Received">
+      <outgoing>Flow_Start_To_Validate</outgoing>
+    </startEvent>
+    <adHocSubProcess id="AdHocSubProcess_LoanAssessmentAgent" name="Loan Assessment Agent" ordering="Parallel" cancelRemainingInstances="false">
+      <documentation>AI agent responsible for assessing a loan application end-to-end. The agent must gather credit, employment, fraud, and collateral data before generating a structured assessment report with a clear APPROVE or REJECT recommendation.
+      </documentation>
+      <extensionElements>
+        <agent:config provider="ollama" model="gpt-5.4" systemPrompt="You are a senior loan assessment analyst. Your goal is to gather enough evidence to make a well-reasoned, defensible lending decision for each applicant. Use your professional judgement to decide which checks are appropriate given the applicant&#39;s circumstances and the information you discover along the way. Once you have sufficient evidence, stop — a separate step will compile the final report. " />
+        <agent:context>
+          <agent:variable name="applicationId" />
+          <agent:variable name="customerId" />
+          <agent:variable name="applicantName" />
+          <agent:variable name="requestedAmount" />
+          <agent:variable name="applicantType" />
+          <agent:variable name="hasCollateral" />
+          <agent:variable name="collateralDescription" />
+          <agent:variable name="loanPurpose" />
+          <agent:variable name="creditScore" />
+          <agent:variable name="creditRiskBand" />
+          <agent:variable name="employmentVerified" />
+          <agent:variable name="annualIncome" />
+          <agent:variable name="bankStatementScore" />
+          <agent:variable name="fraudRiskScore" />
+          <agent:variable name="collateralValue" />
+          <agent:variable name="debtToIncomeRatio" />
+          <agent:variable name="affordabilityPassed" />
+        </agent:context>
+      </extensionElements>
+      <incoming>Flow_Validate_To_Agent</incoming>
+      <serviceTask id="ServiceTask_CreditScoreCheck" name="Check Credit Score" camunda:type="external" camunda:topic="credit-score-check">
+        <documentation>Retrieves the applicant's current credit score from the credit bureau.         Returns a numeric score (300–850) and a risk band: LOW, MEDIUM, or HIGH.</documentation>
+        <extensionElements>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="customerId">${customerId}</camunda:inputParameter>
+            <camunda:outputParameter name="creditScore">${creditScore}</camunda:outputParameter>
+            <camunda:outputParameter name="creditRiskBand">${creditRiskBand}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </extensionElements>
+      </serviceTask>
+      <serviceTask id="ServiceTask_VerifyEmployment" name="Verify Employment" camunda:type="external" camunda:topic="employment-verification">
+        <documentation>Verifies the applicant's current employment status with their stated employer.
+Returns employmentVerified (true/false) and confirmed annualIncome in GBP.</documentation>
+        <extensionElements>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="customerId">${customerId}</camunda:inputParameter>
+            <camunda:outputParameter name="employmentVerified">${employmentVerified}</camunda:outputParameter>
+            <camunda:outputParameter name="annualIncome">${annualIncome}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </extensionElements>
+      </serviceTask>
+      <serviceTask id="ServiceTask_BankStatementAnalysis" name="Analyse Bank Statements" camunda:type="external" camunda:topic="bank-statement-analysis">
+        <documentation>Analyses 12 months of bank statements to confirm income for a self-employed or variable-income applicant. Returns bankStatementScore (0-100, higher is better) and annualIncome in GBP derived from average monthly deposits.</documentation>
+        <extensionElements>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="customerId">${customerId}</camunda:inputParameter>
+            <camunda:outputParameter name="bankStatementScore">${bankStatementScore}</camunda:outputParameter>
+            <camunda:outputParameter name="annualIncome">${annualIncome}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </extensionElements>
+      </serviceTask>
+      <serviceTask id="ServiceTask_FraudScreening" name="Run Fraud Screening" camunda:type="external" camunda:topic="fraud-screening">
+        <documentation>Screens the application and applicant against known fraud patterns and watchlists. Returns fraudRiskScore (0–100); higher scores indicate greater risk.</documentation>
+        <extensionElements>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="applicationId">${applicationId}</camunda:inputParameter>
+            <camunda:inputParameter name="customerId">${customerId}</camunda:inputParameter>
+            <camunda:outputParameter name="fraudRiskScore">${fraudRiskScore}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </extensionElements>
+      </serviceTask>
+      <serviceTask id="ServiceTask_CollateralValuation" name="Value Collateral" camunda:type="external" camunda:topic="collateral-valuation">
+        <documentation>Retrieves a current independent market valuation for any collateral offered against the loan. Returns collateralValue in GBP.
+        </documentation>
+        <extensionElements>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="applicationId">${applicationId}</camunda:inputParameter>
+            <camunda:outputParameter name="collateralValue">${collateralValue}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </extensionElements>
+      </serviceTask>
+      <serviceTask id="ServiceTask_AffordabilityAssessment" name="Assess Affordability" camunda:type="external" camunda:topic="affordability-assessment">
+        <documentation>Calculates whether the applicant can afford the requested loan based on their confirmed income and existing financial commitments. Returns debtToIncomeRatio (0.0–1.0) and affordabilityPassed (true/false).
+        </documentation>
+        <extensionElements>
+          <camunda:inputOutput>
+            <camunda:inputParameter name="customerId">${customerId}</camunda:inputParameter>
+            <camunda:inputParameter name="requestedAmount">${requestedAmount}</camunda:inputParameter>
+            <camunda:outputParameter name="debtToIncomeRatio">${debtToIncomeRatio}</camunda:outputParameter>
+            <camunda:outputParameter name="affordabilityPassed">${affordabilityPassed}</camunda:outputParameter>
+          </camunda:inputOutput>
+        </extensionElements>
+      </serviceTask>
+      <completionCondition>${false}</completionCondition>
+    </adHocSubProcess>
+    <serviceTask id="ServiceTask_GenerateReport" name="Generate Assessment Report" camunda:type="external" camunda:topic="generate-assessment-report">
+      <documentation>
+        Compiles all gathered assessment data into a structured report and
+        sets recommendedDecision to APPROVE or REJECT.
+      </documentation>
+      <incoming>Flow_Agent_To_Report</incoming>
+      <outgoing>Flow_Report_To_Gateway</outgoing>
+    </serviceTask>
+    <exclusiveGateway id="Gateway_AssessmentDecision" name="Recommendation?">
+      <incoming>Flow_Report_To_Gateway</incoming>
+      <outgoing>Flow_Gateway_To_Approve</outgoing>
+      <outgoing>Flow_Gateway_To_Reject</outgoing>
+    </exclusiveGateway>
+    <userTask id="UserTask_ApprovalReview" name="Review and Approve Loan" camunda:candidateGroups="loan-officers">
+      <incoming>Flow_Gateway_To_Approve</incoming>
+      <outgoing>Flow_Approve_To_End</outgoing>
+    </userTask>
+    <serviceTask id="ServiceTask_RejectNotification" name="Send Rejection Notice" camunda:type="external" camunda:topic="rejection-notification">
+      <incoming>Flow_Gateway_To_Reject</incoming>
+      <outgoing>Flow_Reject_To_End</outgoing>
+    </serviceTask>
+    <endEvent id="EndEvent_LoanApproved" name="Loan Approved">
+      <incoming>Flow_Approve_To_End</incoming>
+    </endEvent>
+    <endEvent id="EndEvent_LoanRejected" name="Loan Rejected">
+      <incoming>Flow_Reject_To_End</incoming>
+    </endEvent>
+    <sequenceFlow id="Flow_Start_To_Validate" sourceRef="StartEvent_ApplicationReceived" targetRef="ServiceTask_ValidateApplication" />
+    <sequenceFlow id="Flow_Agent_To_Report" sourceRef="AdHocSubProcess_LoanAssessmentAgent" targetRef="ServiceTask_GenerateReport" />
+    <sequenceFlow id="Flow_Report_To_Gateway" sourceRef="ServiceTask_GenerateReport" targetRef="Gateway_AssessmentDecision" />
+    <sequenceFlow id="Flow_Gateway_To_Approve" name="APPROVE" sourceRef="Gateway_AssessmentDecision" targetRef="UserTask_ApprovalReview">
+      <conditionExpression xsi:type="tFormalExpression">${recommendedDecision == 'APPROVE'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="Flow_Gateway_To_Reject" name="REJECT" sourceRef="Gateway_AssessmentDecision" targetRef="ServiceTask_RejectNotification">
+      <conditionExpression xsi:type="tFormalExpression">${recommendedDecision == 'REJECT'}</conditionExpression>
+    </sequenceFlow>
+    <sequenceFlow id="Flow_Approve_To_End" sourceRef="UserTask_ApprovalReview" targetRef="EndEvent_LoanApproved" />
+    <sequenceFlow id="Flow_Reject_To_End" sourceRef="ServiceTask_RejectNotification" targetRef="EndEvent_LoanRejected" />
+    <userTask id="ServiceTask_ValidateApplication" name="Validate Application" camunda:candidateGroups="loan-officers">
+      <incoming>Flow_Start_To_Validate</incoming>
+      <outgoing>Flow_Validate_To_Agent</outgoing>
+    </userTask>
+    <sequenceFlow id="Flow_Validate_To_Agent" sourceRef="ServiceTask_ValidateApplication" targetRef="AdHocSubProcess_LoanAssessmentAgent" />
+  </process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="loanAssessmentProcess">
+      <bpmndi:BPMNShape id="Shape_StartEvent" bpmnElement="StartEvent_ApplicationReceived">
+        <dc:Bounds x="152" y="252" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="130" y="295" width="81" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ValidateApplication" bpmnElement="ServiceTask_ValidateApplication">
+        <dc:Bounds x="250" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_AdHocSubProcess" bpmnElement="AdHocSubProcess_LoanAssessmentAgent" isExpanded="true">
+        <dc:Bounds x="410" y="80" width="600" height="390" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_CreditScoreCheck" bpmnElement="ServiceTask_CreditScoreCheck">
+        <dc:Bounds x="450" y="125" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_VerifyEmployment" bpmnElement="ServiceTask_VerifyEmployment">
+        <dc:Bounds x="590" y="125" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_BankStatementAnalysis" bpmnElement="ServiceTask_BankStatementAnalysis">
+        <dc:Bounds x="730" y="125" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_FraudScreening" bpmnElement="ServiceTask_FraudScreening">
+        <dc:Bounds x="870" y="125" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_CollateralValuation" bpmnElement="ServiceTask_CollateralValuation">
+        <dc:Bounds x="560" y="310" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_AffordabilityAssessment" bpmnElement="ServiceTask_AffordabilityAssessment">
+        <dc:Bounds x="700" y="310" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_GenerateReport" bpmnElement="ServiceTask_GenerateReport">
+        <dc:Bounds x="1090" y="235" width="160" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_Gateway" bpmnElement="Gateway_AssessmentDecision" isMarkerVisible="true">
+        <dc:Bounds x="1365" y="250" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1348" y="307" width="87" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ApprovalReview" bpmnElement="UserTask_ApprovalReview">
+        <dc:Bounds x="1570" y="170" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_RejectNotification" bpmnElement="ServiceTask_RejectNotification">
+        <dc:Bounds x="1570" y="320" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndApproved" bpmnElement="EndEvent_LoanApproved">
+        <dc:Bounds x="1730" y="192" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1711" y="235" width="75" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_EndRejected" bpmnElement="EndEvent_LoanRejected">
+        <dc:Bounds x="1730" y="342" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1713" y="385" width="71" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Edge_Start_To_Validate" bpmnElement="Flow_Start_To_Validate">
+        <di:waypoint x="188" y="270" />
+        <di:waypoint x="250" y="270" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Validate_To_Agent" bpmnElement="Flow_Validate_To_Agent">
+        <di:waypoint x="350" y="270" />
+        <di:waypoint x="410" y="270" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Agent_To_Report" bpmnElement="Flow_Agent_To_Report">
+        <di:waypoint x="1010" y="275" />
+        <di:waypoint x="1090" y="275" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Report_To_Gateway" bpmnElement="Flow_Report_To_Gateway">
+        <di:waypoint x="1250" y="275" />
+        <di:waypoint x="1365" y="275" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Gateway_To_Approve" bpmnElement="Flow_Gateway_To_Approve">
+        <di:waypoint x="1415" y="275" />
+        <di:waypoint x="1479" y="274" />
+        <di:waypoint x="1540" y="210" />
+        <di:waypoint x="1570" y="210" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1488" y="237" width="53" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Gateway_To_Reject" bpmnElement="Flow_Gateway_To_Reject">
+        <di:waypoint x="1415" y="275" />
+        <di:waypoint x="1480" y="275" />
+        <di:waypoint x="1540" y="360" />
+        <di:waypoint x="1570" y="360" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1487" y="309" width="44" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Approve_To_End" bpmnElement="Flow_Approve_To_End">
+        <di:waypoint x="1670" y="210" />
+        <di:waypoint x="1730" y="210" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Reject_To_End" bpmnElement="Flow_Reject_To_End">
+        <di:waypoint x="1670" y="360" />
+        <di:waypoint x="1730" y="360" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</definitions>
