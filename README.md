@@ -11,7 +11,6 @@ framework.
 
 Proposal to use DeepEval upfront as the eval framework
 
-
 ## Flow
 
 First draft proposal for the flow would be:
@@ -19,7 +18,7 @@ First draft proposal for the flow would be:
 - Update bpmn
 - Deploy to a sandbox environment
 - Initiate the bpmn
-- Handle any pre-tasks / api calls required to complete the target AI task(s)
+- Handle any pre-tasks / api calls required to complete the target AI task (s)
 - Collate the AI Events into a single response Object
 - Eval with DeepEval
 
@@ -48,11 +47,21 @@ The pipeline should collate the events into a single eval object such as:
 
 ```json
 {
-  "goal":"Generate risk report",
-  "finalOutput":"",
-  "iterations":4,
-  "toolCalls":[],
-  "executionTime":4200,
+  "goal": "Generate risk report",
+  "finalOutput": "",
+  "iterations": 4,
+  "toolCalls": [],
+  "executionTime": 4200,
   "step-history": []
 }
 ```
+
+## Harness
+
+Currently, there is a single Python project with 2 responsibilities:
+
+1. To run the bpmn workflow - currently only "deploy the bpmn" is implemented.
+2. To handle the service tasks (not part of the main flow at the moment)
+
+All config for this is driven via a yml file in /harness/config. This file contains the config for creating and
+initiating the bpmn along with the details of what service tasks handlers to register.

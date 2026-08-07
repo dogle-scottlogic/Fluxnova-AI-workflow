@@ -1,0 +1,3 @@
+[console_scripts]
+harness = harness.main:main
+mock-workers = harness.mock_workers:main
