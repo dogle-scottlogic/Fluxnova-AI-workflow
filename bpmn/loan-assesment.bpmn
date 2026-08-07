@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:agent="http://fluxnova.finos.org/schema/1.0/ai/agent" xmlns:modeler="http://fluxnova.finos.org/schema/modeler/1.0" id="Definitions_AgenticSubprocessExample" targetNamespace="http://fluxnova.finos.org/examples/agentic-subprocess" exporter="Fluxnova Modeler" exporterVersion="1.3.0-dev" modeler:executionPlatform="Fluxnova Platform" modeler:executionPlatformVersion="2.0.0">
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:camunda="http://camunda.org/schema/1.0/bpmn" xmlns:agent="http://fluxnova.finos.org/schema/1.0/ai/agent" xmlns:modeler="http://fluxnova.finos.org/schema/modeler/1.0" id="Definitions_AgenticSubprocessExample" targetNamespace="http://fluxnova.finos.org/examples/agentic-subprocess" exporter="Fluxnova Modeler" exporterVersion="1.3.0-dev" modeler:executionPlatform="Fluxnova Platform" modeler:executionPlatformVersion="3.0.0">
   <process id="loanAssessmentProcess" name="Loan Application Assessment" isExecutable="true" camunda:historyTimeToLive="180">
     <startEvent id="StartEvent_ApplicationReceived" name="Loan Application&#10;Received">
       <outgoing>Flow_Start_To_Validate</outgoing>
@@ -8,7 +8,7 @@
       <documentation>AI agent responsible for assessing a loan application end-to-end. The agent must gather credit, employment, fraud, and collateral data before generating a structured assessment report with a clear APPROVE or REJECT recommendation.
       </documentation>
       <extensionElements>
-        <agent:config provider="ollama" model="gpt-5.4" systemPrompt="You are a senior loan assessment analyst. Your goal is to gather enough evidence to make a well-reasoned, defensible lending decision for each applicant. Use your professional judgement to decide which checks are appropriate given the applicant&#39;s circumstances and the information you discover along the way. Once you have sufficient evidence, stop — a separate step will compile the final report. " />
+        <agent:config provider="ollama" model="llama3.2" systemPrompt="You are a senior loan assessment analyst. Your goal is to gather enough evidence to make a well-reasoned, defensible lending decision for each applicant. Use your professional judgement to decide which checks are appropriate given the applicant&#39;s circumstances and the information you discover along the way. Once you have sufficient evidence, stop — a separate step will compile the final report. " />
         <agent:context>
           <agent:variable name="applicationId" />
           <agent:variable name="customerId" />
@@ -147,9 +147,6 @@ Returns employmentVerified (true/false) and confirmed annualIncome in GBP.</docu
           <dc:Bounds x="130" y="295" width="81" height="27" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Shape_ValidateApplication" bpmnElement="ServiceTask_ValidateApplication">
-        <dc:Bounds x="250" y="230" width="100" height="80" />
-      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Shape_AdHocSubProcess" bpmnElement="AdHocSubProcess_LoanAssessmentAgent" isExpanded="true">
         <dc:Bounds x="410" y="80" width="600" height="390" />
       </bpmndi:BPMNShape>
@@ -198,13 +195,12 @@ Returns employmentVerified (true/false) and confirmed annualIncome in GBP.</docu
           <dc:Bounds x="1713" y="385" width="71" height="14" />
         </bpmndi:BPMNLabel>
       </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Shape_ValidateApplication" bpmnElement="ServiceTask_ValidateApplication">
+        <dc:Bounds x="250" y="230" width="100" height="80" />
+      </bpmndi:BPMNShape>
       <bpmndi:BPMNEdge id="Edge_Start_To_Validate" bpmnElement="Flow_Start_To_Validate">
         <di:waypoint x="188" y="270" />
         <di:waypoint x="250" y="270" />
-      </bpmndi:BPMNEdge>
-      <bpmndi:BPMNEdge id="Edge_Validate_To_Agent" bpmnElement="Flow_Validate_To_Agent">
-        <di:waypoint x="350" y="270" />
-        <di:waypoint x="410" y="270" />
       </bpmndi:BPMNEdge>
       <bpmndi:BPMNEdge id="Edge_Agent_To_Report" bpmnElement="Flow_Agent_To_Report">
         <di:waypoint x="1010" y="275" />
@@ -239,6 +235,10 @@ Returns employmentVerified (true/false) and confirmed annualIncome in GBP.</docu
       <bpmndi:BPMNEdge id="Edge_Reject_To_End" bpmnElement="Flow_Reject_To_End">
         <di:waypoint x="1670" y="360" />
         <di:waypoint x="1730" y="360" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Edge_Validate_To_Agent" bpmnElement="Flow_Validate_To_Agent">
+        <di:waypoint x="350" y="270" />
+        <di:waypoint x="410" y="270" />
       </bpmndi:BPMNEdge>
     </bpmndi:BPMNPlane>
   </bpmndi:BPMNDiagram>
