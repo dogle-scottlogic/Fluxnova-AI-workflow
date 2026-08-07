@@ -54,7 +54,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         password=os.environ.get("FLUXNOVA_PASSWORD"),
     )
     deploy(config=cfg, client=client, skip=args.skip_deploy)
-    # initiate(config=cfg, client=client)
+    initiate(config=cfg, client=client)
 
     # handle tasks
     # await complete (how?)
