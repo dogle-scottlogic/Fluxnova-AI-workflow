@@ -1,9 +1,9 @@
 """Entry point for the Fluxnova workflow harness.
 
 Reads a YAML config file, deploys the specified BPMN to Fluxnova,
-opens an SSE event stream, starts a process instance, then waits for
-the process to end.  Once complete, fetches the agent history via HTTP
-and writes it to ``harness/.fluxnova/<process_key>/<instance_id>.json`` in the repo root.
+starts a process instance, polls until it completes, then fetches the
+agent history via HTTP and writes it to
+``harness/.fluxnova/<process_key>/<instance_id>.json`` in the repo root.
 
 Usage
 -----
@@ -17,16 +17,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import queue
 import sys
-import threading
 from collections.abc import Iterable
-from datetime import UTC, datetime
 from pathlib import Path
 
 from fluxnova.client import Client
 from fluxnova.config import WorkflowConfig
-from fluxnova.events import Event
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -61,54 +57,6 @@ def initiate(config: WorkflowConfig, client: Client) -> str:
     return instance_id
 
 
-def _stream_into_queue(client: Client, event_queue: queue.Queue[Event | None]) -> None:
-    """Background thread: stream SSE events and push them onto the queue."""
-    try:
-        for event in client.stream_events():
-            event_queue.put(event)
-    finally:
-        event_queue.put(None)  # sentinel — stream ended
-
-
-def _log_event(event: Event) -> None:
-    ts = datetime.now(UTC).strftime("%H:%M:%S")
-    print(f"  [{ts}] {event}")
-
-
-def listen_for_events(
-    event_queue: queue.Queue[Event | None], instance_id: str
-) -> tuple[str, str | None]:
-    """Log all events; return when the target process instance ends.
-
-    Returns:
-        A tuple of (started_at_iso, completed_at_iso).
-        ``completed_at_iso`` is None if the stream closed before a
-        PROCESS_INSTANCE_END was received for this instance.
-    """
-    print("Waiting for events …\n")
-    started_at = datetime.now(UTC).isoformat()
-    completed_at: str | None = None
-
-    try:
-        while True:
-            event = event_queue.get()
-            if event is None:
-                print("Event stream closed.")
-                break
-            _log_event(event)
-            if (
-                event.sse_type == "PROCESS_INSTANCE_END"
-                and event.process_instance_id == instance_id
-            ):
-                completed_at = datetime.now(UTC).isoformat()
-                print(f"\nProcess {instance_id} ended.")
-                break
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
-
-    return started_at, completed_at
-
-
 def write_report(process_key: str, instance_id: str, agent_history: dict) -> Path:
     """Write the agent history JSON to ``harness/.fluxnova/<process_key>/<instance_id>.json``."""
     runs_dir = _REPO_ROOT / "harness" / ".fluxnova" / process_key
@@ -139,27 +87,21 @@ def main(argv: Iterable[str] | None = None) -> None:
             password=os.environ.get("FLUXNOVA_PASSWORD"),
         )
 
-    # Start the SSE stream before initiating so no events are missed.
-    event_queue: queue.Queue[Event | None] = queue.Queue()
-    stream_thread = threading.Thread(
-        target=_stream_into_queue,
-        args=(client, event_queue),
-        daemon=True,
-        name="event-stream",
-    )
-    stream_thread.start()
-    print("Event stream connected.")
-
     instance_id = initiate(config=cfg, client=client)
-    _started_at, _completed_at = listen_for_events(event_queue, instance_id)
 
-    if cfg.subprocess_id and _completed_at is not None:
+    print("Waiting for process to complete …")
+    client.wait_for_completion(instance_id)
+    print(f"Process {instance_id} completed.")
+
+    if cfg.subprocess_id:
         print(f"Fetching agent history for subprocess '{cfg.subprocess_id}' …")
         agent_history = client.get_agent_history(instance_id, cfg.subprocess_id)
         write_report(cfg.process_key, instance_id, agent_history)
-    elif not cfg.subprocess_id:
+        print(f"Deep Eval: deep-eval config/loan-assesment.yml .fluxnova/{cfg.process_key}/{instance_id}.json")
+    else:
         print("No subprocess_id configured — skipping report.")
 
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+

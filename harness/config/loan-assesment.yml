@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../src/fluxnova/workflow-config.schema.json
 # Fluxnova workflow harness configuration
 #
 # Run with:  harness workflow.yml
@@ -11,6 +12,36 @@ bpmn_path: bpmn/loan-assesment.bpmn
 
 # Process definition key (the `id` attribute on <process> in the BPMN)
 process_key: loanAssessmentProcess
+subprocess_id: AdHocSubProcess_LoanAssessmentAgent
+
+# Path to the golden dataset used for evaluation (relative to the repo root).
+# Generate or regenerate with: python datasets/loan-assessment/generate.py
+dataset_path: datasets/loan-assessment/goldens.json
+
+# Tools available to the agent inside the ad-hoc subprocess.
+# Maps the BPMN service task element ID to its human-readable display name.
+available_tools:
+  ServiceTask_CreditScoreCheck: Check Credit Score
+  ServiceTask_VerifyEmployment: Verify Employment
+  ServiceTask_BankStatementAnalysis: Analyse Bank Statements
+  ServiceTask_FraudScreening: Run Fraud Screening
+  ServiceTask_CollateralValuation: Value Collateral
+  ServiceTask_AffordabilityAssessment: Assess Affordability
+
+# Tools the agent is expected to call, as a flat list of rules evaluated top-to-bottom.
+# Each rule has a required "tool" key and an optional "if" expression.
+# Without "if" the tool is always expected. The expression syntax mirrors GitLab CI:
+#   $variable == "value"   $variable != "value"   $variable == true
+expected_tools:
+  - tool: Check Credit Score
+  - tool: Run Fraud Screening
+  - tool: Assess Affordability
+  - if: '$applicantType == "EMPLOYED"'
+    tool: Verify Employment
+  - if: '$applicantType != "EMPLOYED"'
+    tool: Analyse Bank Statements
+  - if: '$hasCollateral == true'
+    tool: Value Collateral
 
 # Human-readable deployment name shown in Cockpit
 deployment_name: Loan Assessment

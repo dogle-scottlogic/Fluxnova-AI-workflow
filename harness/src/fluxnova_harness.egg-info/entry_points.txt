@@ -1,3 +1,4 @@
 [console_scripts]
-harness = harness.main:main
-mock-workers = harness.mock_workers:main
+deep-eval = deep_eval.main:main
+harness = fluxnova.main:main
+mock-workers = fluxnova.mock_workers:main

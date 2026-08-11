@@ -3,20 +3,16 @@
 Provides helpers for:
 - Deploying a BPMN file
 - Starting a process instance
-- Streaming history events via SSE
-- Polling until the instance completes TODO
-- Fetching final process variables TODO
+- Polling until the instance completes
+- Fetching final process variables
+- Fetching agent history for a subprocess
 """
 
-import json
 import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import requests
-
-from fluxnova.events import Event
 
 
 class ApiError(Exception):
@@ -195,33 +191,6 @@ class Client:
         raise TimeoutError(f"Process instance {instance_id} did not complete within {timeout}s")
 
     # ------------------------------------------------------------------
-    # Event streaming
-    # ------------------------------------------------------------------
-
-    def stream_events(self) -> Iterator[Event]:
-        """Open an SSE connection and yield events as they arrive.
-
-        Subscribes to the fixed set of event types defined in
-        :data:`_STREAM_EVENT_TYPES`.
-
-        Yields:
-            :class:`~fluxnova.events.Event` for each SSE message received.
-
-        Raises:
-            ApiError: If the server returns a non-2xx response on connect.
-        """
-        params = [("eventTypes", t) for t in _STREAM_EVENT_TYPES]
-
-        response = self._session.get(
-            f"{self._base}/history/event-stream",
-            params=params,
-            stream=True,
-            headers={"Accept": "text/event-stream"},
-        )
-        self._raise_for_status(response, "stream events")
-        yield from _parse_sse(response)
-
-    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
@@ -250,34 +219,3 @@ def _to_camunda_vars(variables: dict[str, Any]) -> dict[str, dict[str, Any]]:
         result[name] = {"value": value, "type": camunda_type}
     return result
 
-
-_STREAM_EVENT_TYPES: tuple[str, ...] = (
-    "TASK_INSTANCE_CREATE",
-    "TASK_INSTANCE_COMPLETE",
-    "INCIDENT_CREATE",
-    "JOB_FAIL",
-    "EXTERNAL_TASK_FAIL",
-    "PROCESS_INSTANCE_END",
-    "agent-subprocess:start",
-    "agent-subprocess:end",
-    "agent-llm:request",
-    "agent-llm:response",
-    "agent-tool-call:requested",
-    "agent-tool-call:completed",
-    "agent-tool-call:failed",
-    "agent-loop:start",
-    "agent-loop:end",
-)
-
-
-def _parse_sse(response: requests.Response) -> Iterator[Event]:
-    """Parse an SSE response stream and yield :class:`Event` objects."""
-    sse_type: str | None = None
-    for raw_line in response.iter_lines():
-        line: str = raw_line.decode() if isinstance(raw_line, bytes) else str(raw_line)
-        if line.startswith("event:"):
-            sse_type = line[6:].strip()
-        elif line.startswith("data:") and sse_type is not None:
-            data: dict[str, Any] = json.loads(line[5:].strip())
-            yield Event.from_sse(sse_type, data)
-            sse_type = None
