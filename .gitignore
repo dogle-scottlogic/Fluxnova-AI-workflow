@@ -4,3 +4,4 @@ harness/tests/__pycache__/
 harness/.deepeval
 harness/.fluxnova
 .venv
+.fluxnova/

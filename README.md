@@ -2,6 +2,13 @@
 
 A test harness and evaluation framework for Fluxnova workflows that include AI-driven agentic subprocesses.
 
+Goals of this project are:
+
+- Create an Eval Test framework which facilitates Evaluation Driven Design (EDD). This will allow a demo of how you can
+  build out an agentic workflow using EDD.
+- Add an OTel collector and gen_ai metrics and tracing with a suitable dashboard. This will allow a demo of real time production monitoring
+- Add some mechanism for guardrails which will facilitate checks on responses and break-glass to a human in Production environments.
+
 ## Overview
 
 This project provides:
