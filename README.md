@@ -95,6 +95,79 @@ pytest src/deep_eval/main.py -v \
     --self-contained-html
 ```
 
+## OTel observability (`OtelClient`)
+
+Alongside the `/agent-history` REST-based flow above, the harness can also read GenAI run
+data (iteration/tool-call counts, tool spans, and — once content capture ships — LLM
+messages) straight out of the OTLP trace stream emitted by the `agentic-subprocess` plugin.
+This is **backend-agnostic**: it doesn't depend on whichever vendor (MLflow, Tempo, Jaeger,
+Datadog, ...) your OTel Collector happens to be configured to export to for
+visualisation — it reads the raw OTLP wire format via a small local receiver the harness
+runs itself. See `harness/docs/deepeval-otel-gap-analysis.md` for the full rationale and
+`fluxnova-plugins/agentic-subprocess/docs/observability/GENAI_SEMCONV_ALIGNMENT.md` for the
+exact span/attribute shapes.
+
+### 1. Add a second exporter to your OTel Collector config
+
+Find your Collector's `config.yaml` (e.g. on Windows, if installed as a service:
+`C:\Program Files (x86)\OpenTelemetry Collector\config.yaml`) and add an
+`otlphttp/harness` exporter alongside whatever trace exporter(s) you already have
+(e.g. `otlphttp/mlflow`), then add it to the `traces` pipeline's `exporters` list —
+it's additive, so existing exporters keep working unchanged:
+
+```yaml
+exporters:
+  otlphttp/harness:
+    # Points at the harness's own local OTLP trace receiver (fluxnova.otel_receiver),
+    # not a visualisation backend.
+    traces_endpoint: http://localhost:4319/v1/traces
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp, jaeger, zipkin]
+      processors: [batch]
+      exporters: [debug, otlphttp/mlflow, otlphttp/harness]
+```
+
+Restart the Collector service after saving (e.g. `Restart-Service "OpenTelemetry Collector"`
+from an admin PowerShell — editing `config.yaml` itself also requires admin rights).
+
+### 2. Run the harness's local OTLP receiver
+
+```bash
+cd harness
+otel-receiver --port 4319 --store harness/.fluxnova/otel-spans.json
+```
+
+Leave it running. It accepts `POST /v1/traces` OTLP/HTTP exports and appends each span as
+one JSON line to the store file.
+
+### 3. Drive a process run
+
+Run the harness (or trigger the workflow however you normally do) so the plugin emits
+spans through the Collector to the receiver.
+
+### 4. Verify spans landed
+
+```bash
+Get-Content harness/.fluxnova/otel-spans.json -Tail 5
+```
+
+### 5. Query via `OtelClient`
+
+```python
+from fluxnova.otel_client import OtelClient
+
+client = OtelClient()  # defaults to harness/.fluxnova/otel-spans.json
+correlation_id = "<gen_ai.conversation.id, i.e. the process instance id>"
+
+client.get_invoke_agent_metrics(correlation_id)  # agent name, model, tokens, inference/tool-call counts, duration
+client.get_tool_call_spans(correlation_id)        # one entry per execute_tool span
+```
+
 ## Config file
 
 All harness and evaluation behaviour is driven by a single YAML file.

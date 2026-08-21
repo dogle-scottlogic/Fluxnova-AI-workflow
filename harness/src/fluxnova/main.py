@@ -1,8 +1,8 @@
 """Entry point for the Fluxnova workflow harness.
 
 Reads a YAML config file, deploys the specified BPMN to Fluxnova,
-starts a process instance, polls until it completes, then fetches the
-agent history via HTTP and writes it to
+starts a process instance, polls until it completes, then builds an agent
+report (BPMN + OTLP + core API — see fluxnova.report) and writes it to
 ``harness/.fluxnova/<process_key>/<instance_id>.json`` in the repo root.
 
 Usage
@@ -21,8 +21,11 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from fluxnova.bpmn import BpmnLookup
 from fluxnova.client import Client
 from fluxnova.config import WorkflowConfig
+from fluxnova.otel_client import OtelClient
+from fluxnova.report import build_agent_report
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 
@@ -94,8 +97,10 @@ def main(argv: Iterable[str] | None = None) -> None:
     print(f"Process {instance_id} completed.")
 
     if cfg.subprocess_id:
-        print(f"Fetching agent history for subprocess '{cfg.subprocess_id}' …")
-        agent_history = client.get_agent_history(instance_id, cfg.subprocess_id)
+        print(f"Building agent report for subprocess '{cfg.subprocess_id}' …")
+        bpmn = BpmnLookup(cfg.bpmn_path, cfg.subprocess_id)
+        otel = OtelClient()
+        agent_history = build_agent_report(cfg, client, bpmn, otel, instance_id)
         write_report(cfg.process_key, instance_id, agent_history)
         print(f"Deep Eval: deep-eval config/loan-assesment.yml .fluxnova/{cfg.process_key}/{instance_id}.json")
     else:

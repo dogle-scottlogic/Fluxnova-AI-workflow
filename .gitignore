@@ -1,7 +1,7 @@
 .idea/
-harness/src/harness/__pycache__/
-harness/tests/__pycache__/
+__pycache__/
 harness/.deepeval
 harness/.fluxnova
 .venv
 .fluxnova/
+*.db
