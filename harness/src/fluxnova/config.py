@@ -74,6 +74,16 @@ def _coerce(raw: str) -> Any:
 
 
 @dataclass
+class MlflowDatasetConfig:
+    """Settings controlling whether/how a run is recorded into an MLflow evaluation dataset."""
+
+    enabled: bool = False
+    name: str | None = None
+    tracking_uri: str | None = None
+    also_write_json_report: bool = True
+
+
+@dataclass
 class WorkflowConfig:
     """All settings needed to deploy and start one workflow run."""
 
@@ -88,6 +98,7 @@ class WorkflowConfig:
     available_tools: dict[str, str] = field(default_factory=dict)
     expected_tools: list[ExpectedToolRule] = field(default_factory=list)
     dataset_path: Path | None = None
+    mlflow_dataset: MlflowDatasetConfig | None = None
 
 
     @classmethod
@@ -112,6 +123,17 @@ class WorkflowConfig:
         ]
         raw_dataset_path = raw.get("dataset_path")
         dataset_path = (root_dir / raw_dataset_path) if raw_dataset_path else None
+        raw_mlflow_dataset = raw.get("mlflow_dataset")
+        mlflow_dataset = (
+            MlflowDatasetConfig(
+                enabled=raw_mlflow_dataset.get("enabled", False),
+                name=raw_mlflow_dataset.get("name"),
+                tracking_uri=raw_mlflow_dataset.get("tracking_uri"),
+                also_write_json_report=raw_mlflow_dataset.get("also_write_json_report", True),
+            )
+            if raw_mlflow_dataset
+            else None
+        )
         return cls(
             fluxnova_url=raw["fluxnova_url"].rstrip("/"),
             bpmn_path=bpmn_path,
@@ -124,4 +146,5 @@ class WorkflowConfig:
             available_tools=raw.get("available_tools") or {},
             expected_tools=expected_tools,
             dataset_path=dataset_path,
+            mlflow_dataset=mlflow_dataset,
         )

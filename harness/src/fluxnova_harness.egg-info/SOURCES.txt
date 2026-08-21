@@ -3,11 +3,8 @@ src/deep_eval/__init__.py
 src/deep_eval/conftest.py
 src/deep_eval/main.py
 src/fluxnova/__init__.py
-src/fluxnova/client.py
 src/fluxnova/config.py
-src/fluxnova/events.py
-src/fluxnova/main.py
-src/fluxnova/mock_workers.py
+src/fluxnova/mlflow_dataset.py
 src/fluxnova/workflow-config.schema.json
 src/fluxnova_harness.egg-info/PKG-INFO
 src/fluxnova_harness.egg-info/SOURCES.txt
@@ -15,4 +12,5 @@ src/fluxnova_harness.egg-info/dependency_links.txt
 src/fluxnova_harness.egg-info/entry_points.txt
 src/fluxnova_harness.egg-info/requires.txt
 src/fluxnova_harness.egg-info/top_level.txt
-tests/test_client.py
+src/mlflow_eval/__init__.py
+src/mlflow_eval/main.py

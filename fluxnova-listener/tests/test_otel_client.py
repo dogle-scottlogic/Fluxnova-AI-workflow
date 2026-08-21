@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fluxnova.otel_client import (
+from fluxnova_listener.otel_client import (
     InvokeAgentMetrics,
     OtelClient,
     OtelClientError,
@@ -108,6 +108,45 @@ class TestGetInvokeAgentMetrics:
         client = OtelClient(store_path=store)
         result = client.get_invoke_agent_metrics("proc-123")
         assert result.conversation_id == "proc-123"
+
+
+class TestFindCompletedRuns:
+    def test_returns_conversation_id_and_agent_name_for_matching_agents(self, tmp_path: Path):
+        store = tmp_path / "spans.jsonl"
+        _write_store(store, [
+            _span(
+                "trace-1",
+                "invoke_agent",
+                {
+                    "gen_ai.agent.name": "AdHocSubProcess_LoanAssessmentAgent",
+                    "gen_ai.conversation.id": "proc-123",
+                },
+            ),
+            _span(
+                "trace-2",
+                "invoke_agent",
+                {"gen_ai.agent.name": "SomeOtherAgent", "gen_ai.conversation.id": "proc-999"},
+            ),
+        ])
+        client = OtelClient(store_path=store)
+        result = client.find_completed_runs({"AdHocSubProcess_LoanAssessmentAgent"})
+        assert result == [("proc-123", "AdHocSubProcess_LoanAssessmentAgent")]
+
+    def test_empty_list_when_store_missing(self, tmp_path: Path):
+        client = OtelClient(store_path=tmp_path / "missing.jsonl")
+        assert client.find_completed_runs({"SomeAgent"}) == []
+
+    def test_empty_list_when_no_agent_names_match(self, tmp_path: Path):
+        store = tmp_path / "spans.jsonl"
+        _write_store(store, [
+            _span(
+                "trace-1",
+                "invoke_agent",
+                {"gen_ai.agent.name": "OtherAgent", "gen_ai.conversation.id": "proc-123"},
+            ),
+        ])
+        client = OtelClient(store_path=store)
+        assert client.find_completed_runs({"AdHocSubProcess_LoanAssessmentAgent"}) == []
 
 
 class TestGetToolCallSpans:

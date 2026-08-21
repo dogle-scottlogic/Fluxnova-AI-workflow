@@ -1,8 +1,8 @@
 """Local OTLP trace-store client for the GenAI signals emitted by ``agentic-subprocess``.
 
 Backend-agnostic: reads spans from the local JSON store written by
-``fluxnova.otel_receiver`` instead of any vendor trace-store API. See
-docs/deepeval-otel-gap-analysis.md and GENAI_SEMCONV_ALIGNMENT.md for rationale.
+``fluxnova_listener.otel_receiver`` instead of any vendor trace-store API. See
+harness/docs/deepeval-otel-gap-analysis.md and GENAI_SEMCONV_ALIGNMENT.md for rationale.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_DEFAULT_STORE = Path("harness/.fluxnova/otel-spans.json")
+_DEFAULT_STORE = Path("fluxnova-listener/.data/otel-spans.json")
 
 # Attribute set on every span by ``AgentOtelTracing`` — see
 # GENAI_SEMCONV_ALIGNMENT.md's "Source -> signal mapping" table.
@@ -68,6 +68,28 @@ class OtelClient:
 
     def __init__(self, store_path: Path | str = _DEFAULT_STORE) -> None:
         self._store_path = Path(store_path)
+
+    def find_completed_runs(self, agent_names: set[str]) -> list[tuple[str, str]]:
+        """Return ``(conversation_id, agent_name)`` for every ``invoke_agent`` span
+        in the store whose ``gen_ai.agent.name`` is in ``agent_names``.
+
+        A span only ever appears in the store once its subprocess has ended
+        (spans are exported/appended on span-end), so presence here already
+        means "completed" — no separate polling of the Fluxnova engine is
+        needed to detect completion.
+        """
+        if not self._store_path.exists():
+            return []
+        runs: list[tuple[str, str]] = []
+        for span in self._read_all_spans():
+            attrs = span["attributes"]
+            if attrs.get(_OP_NAME_ATTR) != _INVOKE_AGENT_OP:
+                continue
+            agent_name = attrs.get("gen_ai.agent.name")
+            conversation_id = attrs.get(_CONVERSATION_ID_ATTR)
+            if agent_name in agent_names and conversation_id:
+                runs.append((conversation_id, agent_name))
+        return runs
 
     def get_invoke_agent_metrics(self, correlation_id: str) -> InvokeAgentMetrics:
         """Return iteration/tool-call counts, tokens, and duration for one run.

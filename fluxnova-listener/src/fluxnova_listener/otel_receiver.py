@@ -3,10 +3,11 @@
 Accepts ``POST /v1/traces`` (protobuf, optional gzip) and appends each span
 as one JSON line to a local store file, so ``OtelClient`` can query them
 without depending on a vendor trace-store backend. See
-docs/deepeval-otel-gap-analysis.md and GENAI_SEMCONV_ALIGNMENT.md ("Harness
-OTLP receiver") for the collector config and rationale.
+harness/docs/deepeval-otel-gap-analysis.md and GENAI_SEMCONV_ALIGNMENT.md
+("Harness OTLP receiver") for the collector config and rationale.
 
-Run standalone: ``otel-receiver --port 4319 --store harness/.fluxnova/otel-spans.json``
+Run standalone: ``otel-receiver --port 4319 --store fluxnova-listener/.data/otel-spans.json``
+Also started automatically, in-process, by ``fluxnova_listener.main``.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ _STATUS_CODE_NAMES = {
     PbStatus.STATUS_CODE_ERROR: "ERROR",
 }
 
-_DEFAULT_STORE = Path("harness/.fluxnova/otel-spans.json")
+_DEFAULT_STORE = Path("fluxnova-listener/.data/otel-spans.json")
 _DEFAULT_PORT = 4319
 
 

@@ -5,7 +5,7 @@ immediately completes each task with the configured output variables.
 
 Usage
 -----
-    mock-workers harness/config/loan-assesment.yml
+    fluxnova-run-mock-workers config/loan-assesment.yml
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from typing import Any
 from camunda.external_task.external_task import ExternalTask
 from camunda.external_task.external_task_worker import ExternalTaskWorker
 
-from fluxnova.config import WorkflowConfig
+from fluxnova_runner.config import RunnerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def _make_handler(topic: str, outputs: dict[str, Any]):
 
 
 def start_workers(
-    cfg: WorkflowConfig, username: str | None = None, password: str | None = None
+    cfg: RunnerConfig, username: str | None = None, password: str | None = None
 ) -> list[threading.Thread]:
     """Start one worker daemon thread per topic and return the threads (non-blocking).
 
@@ -102,7 +102,7 @@ def start_workers(
     return threads
 
 
-def run(cfg: WorkflowConfig, username: str | None = None, password: str | None = None) -> None:
+def run(cfg: RunnerConfig, username: str | None = None, password: str | None = None) -> None:
     """Start one worker thread per topic and block until interrupted."""
     threads = start_workers(cfg, username=username, password=password)
     if not threads:
@@ -123,7 +123,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Iterable[str] | None = None) -> None:
     args = parse_args(argv)
-    cfg = WorkflowConfig.from_file(args.config)
+    cfg = RunnerConfig.from_file(args.config)
     run(
         cfg,
         username=os.environ.get("FLUXNOVA_USERNAME"),

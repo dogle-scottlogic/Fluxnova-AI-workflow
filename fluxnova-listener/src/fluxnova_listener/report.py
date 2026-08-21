@@ -1,7 +1,7 @@
 """Builds the agent-history report from OTLP + BPMN + core-API sources.
 
-See docs/deepeval-otel-gap-analysis.md (phased-approach steps 4/7) for the
-rationale and field-by-field mapping.
+See harness/docs/deepeval-otel-gap-analysis.md (phased-approach steps 4/7)
+for the rationale and field-by-field mapping.
 """
 
 from __future__ import annotations
@@ -9,22 +9,26 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fluxnova.bpmn import BpmnLookup
-from fluxnova.client import Client
-from fluxnova.config import WorkflowConfig
-from fluxnova.otel_client import OtelClient
+from fluxnova_listener.bpmn import BpmnLookup
+from fluxnova_listener.client import ListenerClient
+from fluxnova_listener.otel_client import OtelClient
 
 
 def build_agent_report(
-    config: WorkflowConfig,
-    client: Client,
+    client: ListenerClient,
     bpmn: BpmnLookup,
     otel: OtelClient,
     instance_id: str,
+    variable_names: list[str],
 ) -> dict[str, Any]:
-    """Compose an ``/agent-history``-shaped report for one process instance."""
+    """Compose an ``/agent-history``-shaped report for one process instance.
+
+    Args:
+        variable_names: The process variable names to include in
+            ``inputVariables`` (a watched subprocess's ``variables`` config).
+    """
     variables = client.get_variables(instance_id)
-    input_variables = {name: variables[name] for name in config.variables if name in variables}
+    input_variables = {name: variables[name] for name in variable_names if name in variables}
 
     metrics = otel.get_invoke_agent_metrics(instance_id)
     tool_spans = otel.get_tool_call_spans(instance_id)

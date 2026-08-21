@@ -5,15 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fluxnova-harness"
 version = "0.1.0"
-description = "Test harness for deploying and starting Fluxnova workflows"
+description = "Evaluation harness (DeepEval + MLflow) for Fluxnova agentic workflows"
 requires-python = ">=3.11"
 dependencies = [
-    "requests>=2.32",
     "pyyaml>=6.0",
     "jsonschema>=4.0",
-    "camunda-external-task-client-python3>=2.3",
-    "pydantic>=2.0",
-    "opentelemetry-proto>=1.27",
+    "fluxnova-mlflow-dataset",
 ]
 
 [project.optional-dependencies]
@@ -24,13 +21,13 @@ dev = [
     "ruff>=0.5",
     "deepeval>=2.0",
     "ollama>=0.3",
+    "mlflow>=2.18",
+    "litellm>=1.55",
 ]
 
 [project.scripts]
-harness = "fluxnova.main:main"
-mock-workers = "fluxnova.mock_workers:main"
 deep-eval = "deep_eval.main:main"
-otel-receiver = "fluxnova.otel_receiver:main"
+mlflow-eval = "mlflow_eval.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

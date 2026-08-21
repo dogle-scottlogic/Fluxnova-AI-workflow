@@ -1,11 +1,13 @@
-"""Fluxnova REST API client.
+"""Fluxnova REST API client for the automated-run service.
 
-Provides helpers for:
+Provides only what the runner needs:
 - Deploying a BPMN file
 - Starting a process instance
+- Claiming/completing user tasks (used indirectly via mock workers)
 - Polling until the instance completes
-- Fetching final process variables
-- Fetching agent history for a subprocess
+
+(Read-back of agent-history/report data is the listener service's job — see
+``fluxnova_listener.client.ListenerClient``.)
 """
 
 import time
@@ -30,7 +32,6 @@ class Client:
             password: str | None = None,
     ) -> None:
         self._base = base_url.rstrip("/")
-        self._agent_base = self._base.removesuffix("/engine-rest")
         self._root = root or Path.cwd()
         self._session = requests.Session()
         self._session.headers.update({"Content-Type": "application/json"})
@@ -135,23 +136,6 @@ class Client:
         self._raise_for_status(response, "get variables")
         return {item["name"]: item["value"] for item in response.json()}
 
-    def get_agent_history(self, instance_id: str, subprocess_id: str) -> dict[str, Any]:
-        """Fetch the agent history for a completed subprocess.
-
-        Args:
-            instance_id:  The process instance ID.
-            subprocess_id: The BPMN element ID of the ad-hoc subprocess
-                           (e.g. ``AdHocSubProcess_LoanAssessmentAgent``).
-
-        Returns:
-            The raw JSON response from the agent-history endpoint.
-        """
-        response = self._session.get(
-            f"{self._agent_base}/agent-history/process/{instance_id}/subprocess/{subprocess_id}",
-        )
-        self._raise_for_status(response, "get agent history")
-        return response.json()
-
     # ------------------------------------------------------------------
     # Polling helper
     # ------------------------------------------------------------------
@@ -218,4 +202,3 @@ def _to_camunda_vars(variables: dict[str, Any]) -> dict[str, dict[str, Any]]:
         camunda_type = _type_map.get(type(value), "String")
         result[name] = {"value": value, "type": camunda_type}
     return result
-

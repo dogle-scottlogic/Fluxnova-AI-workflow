@@ -65,6 +65,31 @@
       "items": {
         "$ref": "#/$defs/ExpectedToolRule"
       }
+    },
+    "mlflow_dataset": {
+      "type": "object",
+      "description": "Optional: record each completed run as an entry in a persistent MLflow evaluation dataset (in the same SQLite tracking store used by mlflow-eval), in addition to or instead of the JSON report file.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether to write a record to the MLflow dataset for each completed run.",
+          "default": false
+        },
+        "name": {
+          "type": "string",
+          "description": "MLflow evaluation dataset name. Defaults to 'fluxnova-<process_key>'."
+        },
+        "tracking_uri": {
+          "type": "string",
+          "description": "MLflow tracking URI. Defaults to the local SQLite store at harness/.mlflow/mlflow.db."
+        },
+        "also_write_json_report": {
+          "type": "boolean",
+          "description": "Whether to also write the usual JSON agent-history report file. Set false to write only to the MLflow dataset.",
+          "default": true
+        }
+      }
     }
   },
   "$defs": {

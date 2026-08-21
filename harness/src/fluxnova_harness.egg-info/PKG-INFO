@@ -1,13 +1,11 @@
 Metadata-Version: 2.4
 Name: fluxnova-harness
 Version: 0.1.0
-Summary: Test harness for deploying and starting Fluxnova workflows
+Summary: Evaluation harness (DeepEval + MLflow) for Fluxnova agentic workflows
 Requires-Python: >=3.11
-Requires-Dist: requests>=2.32
 Requires-Dist: pyyaml>=6.0
 Requires-Dist: jsonschema>=4.0
-Requires-Dist: camunda-external-task-client-python3>=2.3
-Requires-Dist: pydantic>=2.0
+Requires-Dist: fluxnova-mlflow-dataset
 Provides-Extra: dev
 Requires-Dist: pytest>=8.0; extra == "dev"
 Requires-Dist: pytest-cov>=5.0; extra == "dev"
@@ -15,3 +13,5 @@ Requires-Dist: pytest-html>=4.0; extra == "dev"
 Requires-Dist: ruff>=0.5; extra == "dev"
 Requires-Dist: deepeval>=2.0; extra == "dev"
 Requires-Dist: ollama>=0.3; extra == "dev"
+Requires-Dist: mlflow>=2.18; extra == "dev"
+Requires-Dist: litellm>=1.55; extra == "dev"

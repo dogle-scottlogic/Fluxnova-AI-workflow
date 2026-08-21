@@ -1,0 +1,49 @@
+# Example configuration for the standalone fluxnova-listener service.
+# Copy/adapt this file per environment. See fluxnova_listener/config.py for
+# full field documentation.
+
+fluxnova_url: http://localhost:8080/engine-rest
+poll_interval_seconds: 5
+
+otel:
+  port: 4319
+  store_path: fluxnova-listener/.data/otel-spans.json
+
+mlflow:
+  # Same SQLite tracking store the harness's mlflow_eval suite reads from.
+  tracking_uri: sqlite:///harness/.mlflow/mlflow.db
+
+watch:
+  - subprocess_id: AdHocSubProcess_LoanAssessmentAgent
+    process_key: loanAssessmentProcess
+    bpmn_path: bpmn/loan-assesment.bpmn
+    variables:
+      - applicationId
+      - customerId
+      - applicantName
+      - requestedAmount
+      - applicantType
+      - hasCollateral
+      - collateralDescription
+      - loanPurpose
+    available_tools:
+      ServiceTask_CreditScoreCheck: Check Credit Score
+      ServiceTask_FraudScreening: Run Fraud Screening
+      ServiceTask_VerifyEmployment: Verify Employment
+      ServiceTask_BankStatementAnalysis: Analyse Bank Statements
+      ServiceTask_CollateralValuation: Value Collateral
+      ServiceTask_AffordabilityAssessment: Assess Affordability
+    expected_tools:
+      - tool: Check Credit Score
+      - tool: Run Fraud Screening
+      - tool: Assess Affordability
+      - if: '$applicantType == "EMPLOYED"'
+        tool: Verify Employment
+      - if: '$applicantType != "EMPLOYED"'
+        tool: Analyse Bank Statements
+      - if: '$hasCollateral == true'
+        tool: Value Collateral
+    dataset_path: datasets/loan-assessment/goldens.json
+    dataset_name: fluxnova-loanAssessmentProcess
+    also_write_json_report: true
+    report_dir: fluxnova-listener/.data/reports/loanAssessmentProcess

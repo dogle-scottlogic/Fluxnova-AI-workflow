@@ -1,0 +1,2 @@
+[console_scripts]
+fluxnova-listener = fluxnova_listener.main:main

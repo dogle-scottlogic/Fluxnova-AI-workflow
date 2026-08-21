@@ -1,4 +1,4 @@
-"""Tests for ``fluxnova.report.build_agent_report``."""
+"""Tests for ``fluxnova_listener.report.build_agent_report``."""
 
 from __future__ import annotations
 
@@ -8,15 +8,23 @@ from unittest.mock import Mock
 
 import pytest
 
-from fluxnova.bpmn import BpmnLookup
-from fluxnova.client import Client
-from fluxnova.config import WorkflowConfig
-from fluxnova.otel_client import OtelClient
-from fluxnova.report import build_agent_report
+from fluxnova_listener.bpmn import BpmnLookup
+from fluxnova_listener.client import ListenerClient
+from fluxnova_listener.otel_client import OtelClient
+from fluxnova_listener.report import build_agent_report
 
 _BPMN_PATH = Path(__file__).resolve().parent.parent.parent / "bpmn" / "loan-assesment.bpmn"
 _SUBPROCESS_ID = "AdHocSubProcess_LoanAssessmentAgent"
 _NS_PER_MS = 1_000_000
+
+_VARIABLE_NAMES = [
+    "applicationId",
+    "customerId",
+    "applicantName",
+    "requestedAmount",
+    "applicantType",
+    "hasCollateral",
+]
 
 
 def _span(
@@ -44,24 +52,6 @@ def _span(
 
 def _write_store(path: Path, spans: list[dict]) -> None:
     path.write_text("\n".join(json.dumps(s) for s in spans) + "\n", encoding="utf-8")
-
-
-def _config() -> WorkflowConfig:
-    return WorkflowConfig(
-        fluxnova_url="http://localhost:8080/engine-rest",
-        bpmn_path=_BPMN_PATH,
-        process_key="loanAssessmentProcess",
-        deployment_name="Loan Assessment",
-        subprocess_id=_SUBPROCESS_ID,
-        variables={
-            "applicationId": "APP-001",
-            "customerId": "C001",
-            "applicantName": "Jane Smith",
-            "requestedAmount": 50000,
-            "applicantType": "EMPLOYED",
-            "hasCollateral": False,
-        },
-    )
 
 
 @pytest.fixture
@@ -119,7 +109,7 @@ def otel(tmp_path: Path) -> OtelClient:
 
 @pytest.fixture
 def client() -> Mock:
-    mock = Mock(spec=Client)
+    mock = Mock(spec=ListenerClient)
     mock.get_variables.return_value = {
         "applicationId": "APP-001",
         "customerId": "C001",
@@ -134,7 +124,7 @@ def client() -> Mock:
 
 
 def test_build_agent_report_shape(client: Mock, bpmn: BpmnLookup, otel: OtelClient) -> None:
-    report = build_agent_report(_config(), client, bpmn, otel, "proc-123")
+    report = build_agent_report(client, bpmn, otel, "proc-123", _VARIABLE_NAMES)
 
     assert report["processInstanceId"] == "proc-123"
     assert report["goal"].startswith("You are a senior loan assessment analyst.")
@@ -147,7 +137,7 @@ def test_build_agent_report_shape(client: Mock, bpmn: BpmnLookup, otel: OtelClie
 
 
 def test_input_variables_excludes_tool_outputs(client: Mock, bpmn: BpmnLookup, otel: OtelClient) -> None:
-    report = build_agent_report(_config(), client, bpmn, otel, "proc-123")
+    report = build_agent_report(client, bpmn, otel, "proc-123", _VARIABLE_NAMES)
 
     assert report["inputVariables"] == {
         "applicationId": "APP-001",
@@ -161,7 +151,7 @@ def test_input_variables_excludes_tool_outputs(client: Mock, bpmn: BpmnLookup, o
 
 
 def test_tool_calls_resolve_element_id_and_input(client: Mock, bpmn: BpmnLookup, otel: OtelClient) -> None:
-    report = build_agent_report(_config(), client, bpmn, otel, "proc-123")
+    report = build_agent_report(client, bpmn, otel, "proc-123", _VARIABLE_NAMES)
 
     assert len(report["toolCalls"]) == 1
     call = report["toolCalls"][0]
@@ -177,5 +167,5 @@ def test_tool_calls_resolve_element_id_and_input(client: Mock, bpmn: BpmnLookup,
 
 
 def test_client_get_variables_called_with_instance_id(client: Mock, bpmn: BpmnLookup, otel: OtelClient) -> None:
-    build_agent_report(_config(), client, bpmn, otel, "proc-123")
+    build_agent_report(client, bpmn, otel, "proc-123", _VARIABLE_NAMES)
     client.get_variables.assert_called_once_with("proc-123")

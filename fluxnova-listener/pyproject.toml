@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fluxnova-listener"
+version = "0.1.0"
+description = "Standalone service: listens for OTel GenAI traces and records completed Fluxnova agentic subprocess runs into an MLflow evaluation dataset"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32",
+    "pyyaml>=6.0",
+    "opentelemetry-proto>=1.27",
+    "fluxnova-mlflow-dataset",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+fluxnova-listener = "fluxnova_listener.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+src = ["src"]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["fluxnova_listener"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"

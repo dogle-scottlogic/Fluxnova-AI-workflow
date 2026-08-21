@@ -1,0 +1,8 @@
+requests>=2.32
+pyyaml>=6.0
+opentelemetry-proto>=1.27
+fluxnova-mlflow-dataset
+
+[dev]
+pytest>=8.0
+ruff>=0.5

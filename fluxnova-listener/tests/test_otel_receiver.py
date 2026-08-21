@@ -12,7 +12,7 @@ from opentelemetry.proto.common.v1 import common_pb2
 from opentelemetry.proto.resource.v1 import resource_pb2
 from opentelemetry.proto.trace.v1 import trace_pb2
 
-from fluxnova.otel_receiver import make_server, parse_export_request
+from fluxnova_listener.otel_receiver import make_server, parse_export_request
 
 
 def _kv(key: str, **value_kwargs) -> common_pb2.KeyValue:

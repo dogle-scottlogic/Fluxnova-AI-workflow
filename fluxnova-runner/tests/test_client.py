@@ -1,4 +1,4 @@
-"""Tests for Client, WorkflowConfig, and mock_workers helpers."""
+"""Tests for RunnerConfig, Client, and mock_workers helpers."""
 
 import textwrap
 from pathlib import Path
@@ -6,17 +6,17 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from harness.client import ApiError, Client, _to_camunda_vars
-from harness.config import WorkflowConfig
-from harness.mock_workers import _make_handler
-from harness.mock_workers import _to_camunda_vars as mw_to_camunda_vars
+from fluxnova_runner.client import ApiError, Client, _to_camunda_vars
+from fluxnova_runner.config import RunnerConfig
+from fluxnova_runner.mock_workers import _make_handler
+from fluxnova_runner.mock_workers import _to_camunda_vars as mw_to_camunda_vars
 
 # ---------------------------------------------------------------------------
-# WorkflowConfig
+# RunnerConfig
 # ---------------------------------------------------------------------------
 
 
-class TestWorkflowConfig:
+class TestRunnerConfig:
     def _cfg_file(self, tmp_path: Path, extra: str = "") -> Path:
         bpmn = tmp_path / "my.bpmn"
         bpmn.touch()
@@ -32,7 +32,7 @@ class TestWorkflowConfig:
         return cfg
 
     def test_loads_basic_fields(self, tmp_path: Path):
-        cfg = WorkflowConfig.from_file(self._cfg_file(tmp_path))
+        cfg = RunnerConfig.from_file(self._cfg_file(tmp_path))
         assert cfg.fluxnova_url == "http://localhost:8080/engine-rest"
         assert cfg.process_key == "myProcess"
         assert cfg.variables == {}
@@ -40,7 +40,7 @@ class TestWorkflowConfig:
 
     def test_loads_variables(self, tmp_path: Path):
         extra = "variables:\n  amount: 1000\n  name: Alice\n"
-        cfg = WorkflowConfig.from_file(self._cfg_file(tmp_path, extra))
+        cfg = RunnerConfig.from_file(self._cfg_file(tmp_path, extra))
         assert cfg.variables == {"amount": 1000, "name": "Alice"}
 
     def test_loads_mock_workers(self, tmp_path: Path):
@@ -50,22 +50,18 @@ class TestWorkflowConfig:
                 score: 99
                 passed: true
         """)
-        cfg = WorkflowConfig.from_file(self._cfg_file(tmp_path, extra))
+        cfg = RunnerConfig.from_file(self._cfg_file(tmp_path, extra))
         assert cfg.mock_workers == {"my-topic": {"score": 99, "passed": True}}
 
     def test_empty_mock_workers_defaults_to_empty_dict(self, tmp_path: Path):
-        cfg = WorkflowConfig.from_file(self._cfg_file(tmp_path))
+        cfg = RunnerConfig.from_file(self._cfg_file(tmp_path))
         assert cfg.mock_workers == {}
 
     def test_absolute_bpmn_path_preserved(self, tmp_path: Path):
         bpmn = tmp_path / "my.bpmn"
         bpmn.touch()
-        cfg = WorkflowConfig.from_file(self._cfg_file(tmp_path))
+        cfg = RunnerConfig.from_file(self._cfg_file(tmp_path))
         assert cfg.bpmn_path == bpmn
-
-    def test_empty_variables_defaults_to_empty_dict(self, tmp_path: Path):
-        cfg = WorkflowConfig.from_file(self._cfg_file(tmp_path))
-        assert cfg.variables == {}
 
     def test_trailing_slash_stripped_from_url(self, tmp_path: Path):
         bpmn = tmp_path / "my.bpmn"
@@ -76,8 +72,25 @@ class TestWorkflowConfig:
             f"bpmn_path: {bpmn}\n"
             f"process_key: p\n"
         )
-        cfg = WorkflowConfig.from_file(cfg_file)
+        cfg = RunnerConfig.from_file(cfg_file)
         assert not cfg.fluxnova_url.endswith("/")
+
+    def test_ignores_eval_only_extra_fields(self, tmp_path: Path):
+        """Fields owned by the listener/eval tools (subprocess_id, available_tools,
+        expected_tools, dataset_path, mlflow_dataset) should be silently ignored so
+        the same YAML config can be reused by the runner without modification."""
+        extra = textwrap.dedent("""\
+            subprocess_id: AdHocSubProcess_LoanAssessmentAgent
+            available_tools:
+              ServiceTask_Foo: Foo
+            expected_tools:
+              - tool: Foo
+            dataset_path: datasets/foo/goldens.json
+            mlflow_dataset:
+              enabled: true
+        """)
+        cfg = RunnerConfig.from_file(self._cfg_file(tmp_path, extra))
+        assert cfg.process_key == "myProcess"
 
 
 # ---------------------------------------------------------------------------
@@ -233,4 +246,3 @@ class TestMakeHandler:
         mock_task.get_task_id.return_value = "task-2"
         handler(mock_task)
         mock_task.complete.assert_called_once_with(global_variables={})
-

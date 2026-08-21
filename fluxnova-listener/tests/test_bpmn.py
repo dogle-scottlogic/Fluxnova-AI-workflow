@@ -1,4 +1,4 @@
-"""Tests for ``fluxnova.bpmn`` against the real loan-assessment BPMN fixture."""
+"""Tests for ``fluxnova_listener.bpmn`` against the real loan-assessment BPMN fixture."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from fluxnova.bpmn import BpmnLookup, BpmnLookupError
+from fluxnova_listener.bpmn import BpmnLookup, BpmnLookupError
 
 _BPMN_PATH = Path(__file__).resolve().parent.parent.parent / "bpmn" / "loan-assesment.bpmn"
 _SUBPROCESS_ID = "AdHocSubProcess_LoanAssessmentAgent"
