@@ -3,8 +3,9 @@
 Reads a YAML config file, deploys the specified BPMN to Fluxnova, optionally
 starts mock external-task workers, starts a process instance, and polls
 until it completes. Reporting/evaluation is *not* this service's job — run
-``fluxnova-listener`` alongside it (or independently) to record completed
-agentic subprocess runs into the MLflow evaluation dataset.
+``mlflow-eval <config> --collect`` afterwards (or independently, any time
+later) to pull the completed agentic subprocess run out of MLflow's trace
+store and record it into the MLflow evaluation dataset.
 
 Usage
 -----
@@ -82,8 +83,8 @@ def main(argv: Iterable[str] | None = None) -> None:
     client.wait_for_completion(instance_id)
     print(f"Process {instance_id} completed.")
     print(
-        "Run 'fluxnova-listener' alongside this service to record the completed "
-        "subprocess run into the MLflow evaluation dataset."
+        "Run 'mlflow-eval <config> --collect' to record the completed subprocess run "
+        "into the MLflow evaluation dataset."
     )
 
 

@@ -5,10 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "fluxnova-mlflow-dataset"
 version = "0.1.0"
-description = "Shared MLflow evaluation-dataset record shaping/read/write logic used by fluxnova-listener and the harness's mlflow_eval suite"
+description = "Shared MLflow evaluation-dataset record shaping/read/write/collect logic used by the harness's mlflow_eval suite"
 requires-python = ">=3.11"
 dependencies = [
     "mlflow>=2.18",
+    "requests>=2.32",
 ]
 
 [project.optional-dependencies]

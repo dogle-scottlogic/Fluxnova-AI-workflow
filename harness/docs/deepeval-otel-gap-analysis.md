@@ -1,10 +1,16 @@
 # DeepEval Data Requirements vs. OTEL Coverage — Gap Analysis
 
 > **Note (post-refactor):** this analysis was written while OTel ingestion (`otel_client`/`otel_receiver`)
-> and the harness's own workflow runner lived inside `harness/src/fluxnova/`. That code has since moved
-> into standalone `fluxnova-listener`/`fluxnova-runner` packages (see the root `README.md` for the current
-> architecture) — module paths below (e.g. `fluxnova.otel_receiver`, `fluxnova.bpmn`) now correspond to
-> `fluxnova_listener.otel_receiver`, `fluxnova_listener.bpmn`, etc. The findings/rationale are unchanged.
+> and the harness's own workflow runner lived inside `harness/src/fluxnova/`. That code briefly moved
+> into a standalone `fluxnova-listener` background service, and has since been retired entirely: the
+> OTel Collector now exports traces straight to MLflow (`/v1/traces`), and `fluxnova-mlflow-dataset`'s
+> `collect_new_runs` reads them back on demand via `mlflow.search_traces` (invoked via
+> `mlflow-eval --collect`) instead of running its own OTLP receiver/local span store. See the root
+> `README.md` and `proposal.md` for the current architecture. Module paths below (e.g.
+> `fluxnova.otel_receiver`, `fluxnova.bpmn`) now correspond to `fluxnova_mlflow_dataset.traces`,
+> `fluxnova_mlflow_dataset.bpmn`, etc. The findings/rationale below are otherwise unchanged and kept for
+> historical context; the "pick and stand up an OTLP query path" conclusion in particular has been
+> superseded now that MLflow itself is the chosen trace store.
 
 ## Purpose
 

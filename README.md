@@ -8,81 +8,96 @@ Goals of this project are:
   build out an agentic workflow using EDD.
 - Add an OTel collector and gen_ai metrics and tracing with a suitable dashboard. This will allow a demo of real time
   production monitoring
-- Add some mechanism for guardrails which will facilitate checks on responses and break-glass to a human in Production
-  environments.
+- Add Eval to production level process runs which will facilitate checks on responses and break-glass to a human in
+  Production environments.
 
 ## Overview
 
-This project is split into four independent Python packages:
+This project is split into three independent Python packages:
 
 1. **`fluxnova-runner`** (`fluxnova-runner/`) — deploys a BPMN workflow to Fluxnova, starts a process instance with
    configurable input variables, drives mock external-task workers, and polls until the process completes. It does
-   **not** produce any evaluation report itself — that's the listener's job (see below).
-2. **`fluxnova-listener`** (`fluxnova-listener/`) — a standalone, long-running background service. It runs a small
-   OTLP/HTTP trace receiver, polls the captured spans for completed agentic subprocess runs (matched by BPMN element id
-   against a configured watch-list), and for each newly-completed run builds an agent-history report and records it into
-   a persistent MLflow evaluation dataset (optionally also as a JSON file).
-3. **`fluxnova-mlflow-dataset`** (`fluxnova-mlflow-dataset/`) — a small shared library (no CLI) used by both the
-   listener and the harness's `mlflow-eval` suite: builds MLflow-dataset records from agent-history data and
-   reads/writes the persistent SQLite-backed MLflow evaluation dataset (with skip-if-exists/upsert semantics).
-4. **`harness`** (`harness/`) — the two evaluation suites:
-    - **DeepEval evaluation suite** (`deep-eval`) — loads an agent-history JSON report and evaluates the LLM agent's
-      behaviour using configurable metrics: tool correctness, argument correctness, decision quality, evidence citation,
-      and deterministic safety checks.
-    - **MLflow evaluation suite** (`mlflow-eval`) — an alternative to the DeepEval suite above, evaluating agent-history
-      data with `mlflow.genai.evaluate` scorers instead, with results browsable in the MLflow UI. It can evaluate a
-      single ad-hoc report file, a single previously recorded run (by process instance ID, read from the MLflow dataset
-      the listener populates), or every recorded run at once.
-
-   Both evaluation suites can be run independently; neither depends on the other, and neither depends on the runner or
-   listener being active at evaluation time (only on the report file / dataset records they've already produced).
+   **not** produce any evaluation report itself.
+2. **`fluxnova-mlflow-dataset`** (`fluxnova-mlflow-dataset/`) — a small shared library (no CLI) used by the harness's
+   `mlflow-eval` suite. It provides:
+    - **collection** (`collect_new_runs`) — an on-demand pre-step (run via `mlflow-eval --collect`, not a background
+      service) that finds newly-completed agentic subprocess runs directly in MLflow's own trace store (populated by an
+      OTel Collector exporting straight to MLflow), builds an agent-history report by joining that trace data with the
+      static BPMN definition and the run's final process variables (read from Fluxnova's core REST API), and upserts it
+      into a persistent MLflow evaluation dataset (skip-if-exists/idempotent).
+    - **record shaping/read/write** — builds MLflow-dataset records from agent-history data and reads/writes the
+      persistent SQLite-backed MLflow evaluation dataset.
+3. **`harness`** (`harness/`) — the two evaluation suites:
+    - **MLflow evaluation suite** (`mlflow-eval`) — the primary evaluation suite, evaluating agent-history data with
+      `mlflow.genai.evaluate` scorers, with results browsable in the MLflow UI. It can evaluate a single ad-hoc report
+      file, a single previously recorded run (by process instance ID, read from the MLflow dataset), or every recorded
+      run at once — optionally collecting newly-completed runs first (`--collect`).
+    - **DeepEval evaluation suite** (`deep-eval`) — *deprecated*. Loads an agent-history JSON report and evaluates the
+      LLM agent's behaviour using configurable metrics: tool correctness, argument correctness, decision quality,
+      evidence citation, and deterministic safety checks. Both evaluation suites can be run independently; neither
+      depends on the other, and neither depends on the runner being active at evaluation time (only on the report file /
+      trace data / dataset records already produced).
 
 ## Architecture
 
 ```
-┌───────────────────────────┐        ┌──────────────────────────────────────────────┐
-│  fluxnova-runner CLI      │        │  fluxnova-listener service (long-running)     │
-│  (fluxnova-run)           │        │  (fluxnova-listener)                          │
-│                           │        │                                                │
-│  1. Deploy BPMN           │        │  1. Run local OTLP/HTTP trace receiver         │
-│     → Fluxnova engine     │        │     (POST /v1/traces) fed by the OTel          │
-│  2. Start process         │        │     Collector                                  │
-│     instance with input   │        │  2. Poll captured spans for invoke_agent runs  │
-│     variables             │        │     matching a configured watch-list of BPMN   │
-│  3. Run mock external-    │        │     subprocess element ids (presence of a span │
-│     task workers          ├───────▶│     IS the "completed" signal)                 │
-│  4. Poll until process    │  OTel  │  3. Build an agent-history report (BPMN +      │
-│     completes             │ traces │     OTLP + core API) for each new run          │
-│                           │        │  4. Upsert into the MLflow evaluation dataset  │
-│                           │        │     (skip if already recorded)                 │
-│                           │        │  5. Optionally also write a JSON report file   │
-└───────────────────────────┘        └───────────────────────┬────────────────────────┘
-                                                              │ MLflow dataset record
-                                                              │ and/or JSON report
+┌───────────────────────────┐        ┌──────────────────────────────────────┐
+│  fluxnova-runner CLI      │        │  Agent's OTel instrumentation        │
+│  (fluxnova-run)           │        │                                      │
+│                           │        │  Emits gen_ai.* spans (invoke_agent, │
+│  1. Deploy BPMN           │        │  execute_tool, chat) via OTLP        │
+│     → Fluxnova engine     │        └───────────────────┬──────────────────┘
+│  2. Start process         │                            │ OTLP
+│     instance with input   │                            ▼
+│     variables             │                  ┌────────────────────┐
+│  3. Run mock external-    │                  │   OTel Collector   │
+│     task workers          │                  └──────────┬─────────┘
+│  4. Poll until process    │                             │ otlphttp exporter
+│     completes             │                             ▼
+│                           │                  ┌────────────────────────────┐
+└───────────────────────────┘                  │  MLflow  /v1/traces        │
+                                               │  (trace store)             │
+                                               └──────────────┬─────────────┘
+                                                              │ mlflow.search_traces()
                                                               ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
-│  deep-eval CLI                              │  mlflow-eval CLI                       │
-│                                              │                                        │
-│  Reads config YAML + agent-history JSON     │  Reads config YAML + agent-history JSON │
-│  Evaluates with DeepEval metrics            │  OR reads an existing MLflow dataset    │
-│  (Ollama / llama3.2)                        │  record by --instance-id / --all        │
-│  Outputs pass/fail per test                 │  Evaluates with MLflow scorers          │
-│  + terminal summary + HTML report           │  (Ollama / llama3.2)                    │
+│  mlflow-eval CLI  --collect  (on-demand pre-step; no background service)            │
+│                                                                                     │
+│  1. Find newly-completed invoke_agent traces for the configured subprocess_id       │
+│  2. Join with BPMN (system prompt, tool input params) + Fluxnova core API           │
+│     (final process variables, via /history/variable-instance)                       │
+│  3. Upsert an agent-history record into the persistent MLflow evaluation dataset    │
+│     (skip if already recorded)                                                      │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│  deep-eval CLI (deprecated)                  │  mlflow-eval CLI                        │
+│                                              │                                         │
+│  Reads config YAML + agent-history JSON      │  Reads config YAML + agent-history JSON │
+│  Evaluates with DeepEval metrics             │  OR reads an existing MLflow dataset    │
+│  (Ollama / llama3.2)                         │  record by --instance-id / --all        │
+│  Outputs pass/fail per test                  │  Evaluates with MLflow scorers          │
+│  + terminal summary + HTML report            │  (Ollama / llama3.2)                    │
 │                                              │  Outputs metrics summary; browse in the │
 │                                              │  MLflow UI                              │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Prerequisites
 
 - Python 3.11+
 - A running [Fluxnova](https://fluxnova.io) engine (default: `http://localhost:8080/engine-rest`)
+- A running **MLflow tracking server** (not just the `mlflow` CLI) on `http://localhost:5000`, backed by the same SQLite
+  store the harness uses — see "Running the MLflow tracking server" below. It must be running *before* you run the
+  workflow, since the OTel Collector posts traces to it in real time.
+- An OTel Collector configured with an `otlphttp` exporter pointing at MLflow's `/v1/traces` endpoint — required for
+  `mlflow-eval --collect` to find completed runs
 - [Ollama](https://ollama.com) with `llama3.2` pulled — used as the judge model for both the DeepEval and MLflow
   evaluation suites
 
 ## Installation
 
-All four packages share a single virtual environment (created under `harness/.venv`) and are installed editable, so
+All three packages share a single virtual environment (created under `harness/.venv`) and are installed editable, so
 changes to any package take effect immediately without reinstalling:
 
 ```bash
@@ -92,12 +107,11 @@ source .venv/Scripts/activate   # Git Bash on Windows; use .venv\Scripts\Activat
 
 pip install -e ".[dev]"
 pip install -e ../fluxnova-mlflow-dataset[dev]
-pip install -e ../fluxnova-listener[dev]
 pip install -e ../fluxnova-runner[dev]
 ```
 
-This installs four console-script entry points into `harness/.venv`: `fluxnova-run` / `fluxnova-run-mock-workers`
-(runner), `fluxnova-listener` (listener), and `deep-eval` / `mlflow-eval` (harness evaluation suites).
+This installs three console-script entry points into `harness/.venv`: `fluxnova-run` / `fluxnova-run-mock-workers`
+(runner), and `deep-eval` / `mlflow-eval` (harness evaluation suites).
 
 ## A note on shells (Windows)
 
@@ -107,168 +121,149 @@ silently mangle the path (e.g. `config\loan-assesment.yml` becomes `configloan-a
 use in native **PowerShell** or `cmd.exe`, but forward slashes work everywhere, so they're used consistently in this
 README.
 
-## Running the harness
+## Running `fluxnova-runner` (Windows Git Bash)
+
+From a Git Bash terminal, with `harness/.venv` activated (`source .venv/Scripts/activate` — see Installation above)
+and your working directory at `harness/`:
 
 ```bash
-harness config/loan-assesment.yml --with-mock-workers
+fluxnova-run config/loan-assesment.yml --with-mock-workers
 ```
 
-This deploys the BPMN, starts the process, runs mock workers in the background, waits for completion, and writes the
-agent-history report to `harness/.fluxnova/<processKey>/<instanceId>.json`.
+This deploys the BPMN, starts the process instance with the config's `variables`, runs mock external-task workers in the
+background to complete each service task, and polls until the process finishes. It prints the **process instance ID** to
+the terminal, e.g.:
 
-## Running the evaluations
-
-```bash
-# Via the entry point (recommended — generates both the DeepEval score summary and an HTML report)
-deep-eval config/loan-assesment.yml \
-          .fluxnova/loanAssessmentProcess/<instanceId>.json
+```
+Deploying bpmn/loan-assesment.bpmn …
+  Deployed 'Loan Assessment' (id=...)
+Starting process 'loanAssessmentProcess' …
+  Instance ID: 3816567e-9f94-11f1-9ead-94b609a26547
+Waiting for process to complete …
+Process 3816567e-9f94-11f1-9ead-94b609a26547 completed.
+Run 'mlflow-eval <config> --collect' to record the completed subprocess run into the MLflow evaluation dataset.
 ```
 
-Two reports are written on every run (pass or fail):
+`fluxnova-runner` **does not** write an agent-history report file itself (that responsibility moved to
+`fluxnova-mlflow-dataset`/`mlflow-eval`, per the Architecture diagram above) — copy the printed instance ID and use it
+in the next step.
 
-| Report                 | Location                                        |
-|------------------------|-------------------------------------------------|
-| DeepEval score summary | printed to terminal at end of session           |
-| HTML report            | `.fluxnova/<processKey>/<instanceId>-eval.html` |
+Other flags:
 
 ```bash
-# Via the deepeval CLI directly (also generates the DeepEval score summary)
-deepeval test run src/deep_eval/main.py \
-    --config config/loan-assesment.yml \
-    --report .fluxnova/loanAssessmentProcess/<instanceId>.json
-
-# Via pytest (HTML report only — no DeepEval score summary)
-pytest src/deep_eval/main.py -v \
-    --config config/loan-assesment.yml \
-    --report .fluxnova/loanAssessmentProcess/<instanceId>.json \
-    --html .fluxnova/loanAssessmentProcess/<instanceId>-eval.html \
-    --self-contained-html
+fluxnova-run --skip-deploy config/loan-assesment.yml   # BPMN already deployed
+fluxnova-run config/loan-assesment.yml                 # no mock workers (needs real service-task workers/backends)
 ```
 
-## Running the evaluations (MLflow, alternative)
+### Then evaluate that run with `mlflow-eval`
 
-`mlflow-eval` is a drop-in alternative to `deep-eval` — same config YAML, same underlying Ollama/llama3.2 judge model,
-but scored with `mlflow.genai.evaluate` scorers instead of DeepEval metrics. It supports three ways to select what to
-evaluate:
+Make sure the MLflow tracking server is running first (see "Running the MLflow tracking server" below) and the OTel
+Collector is exporting to it, then, still from `harness/`:
 
 ```bash
-# 1. A single ad-hoc agent-history JSON report file (same as deep-eval)
-mlflow-eval config/loan-assesment.yml \
-            .fluxnova/loanAssessmentProcess/<instanceId>.json
+mlflow-eval config/loan-assesment.yml --collect --instance-id 3816567e-9f94-11f1-9ead-94b609a26547
+```
 
-# 2. A single previously recorded run, read back from the MLflow dataset by process instance ID
-#    (requires mlflow_dataset.enabled: true in the config when that run was originally produced — see below)
+`--collect` pulls that instance's completed trace out of MLflow's trace store, joins it with the BPMN and Fluxnova's
+process-variable history, and records it into the persistent MLflow evaluation dataset; `--instance-id` then immediately
+evaluates just that one record and prints the scorer summary to the terminal. See "Running the evaluations (MLflow,
+primary)" and "Collecting completed runs" below for the other modes (`--all`, `--collect` alone).
+
+## Running the evaluations (MLflow, primary)
+
+`mlflow-eval` is the primary evaluation suite (`deep-eval` above is deprecated) — same config YAML, same underlying
+Ollama/llama3.2 judge model, but scored with `mlflow.genai.evaluate` scorers. It supports:
+
+```bash
+# 1. A single previously recorded run, read back from the MLflow dataset by process instance ID
 mlflow-eval config/loan-assesment.yml --instance-id <instanceId>
 
-# 3. Every run currently recorded in the MLflow dataset for this process_key
+# 2. Every run currently recorded in the MLflow dataset for this process_key
 mlflow-eval config/loan-assesment.yml --all
+
+# 3. --collect: pull newly-completed runs out of MLflow's trace store first (see below),
+#    then evaluate. Can also be used on its own, with no evaluation selector, to only collect.
+mlflow-eval config/loan-assesment.yml --collect --all
+mlflow-eval config/loan-assesment.yml --collect
 ```
+
+`mlflow-eval` only evaluates runs already recorded in the persistent MLflow dataset — there is no ad-hoc
+agent-history-report-file mode. Use `--collect` first (or on its own) to populate the dataset from MLflow's trace store
+before evaluating.
 
 Each of these prints an aggregate metrics summary to the terminal (MLflow's own `EvaluationResult.metrics` — there is no
 bespoke report file) and writes full per-scorer results (scores, rationales, inputs/outputs) to a local SQLite tracking
 store at `harness/.mlflow/mlflow.db`.
 
-To view the results in the browser, start the MLflow UI pointed at that store:
-
-```bash
-mlflow ui --backend-store-uri sqlite:///harness/.mlflow/mlflow.db --port 5000
-```
+To view the results in the browser, use the same MLflow tracking server described in "Running the MLflow tracking
+server" below (or, if you only need read-only browsing and aren't using `--collect`/OTel ingestion, the lighter-weight
+`mlflow ui --backend-store-uri sqlite:///harness/.mlflow/mlflow.db --port 5000` works too).
 
 Then open [http://localhost:5000](http://localhost:5000) and open the `fluxnova-loanAssessmentProcess` experiment. Each
 `mlflow-eval` run appears as a row; click into one to see per-scorer scores and rationales. Running
-`mlflow-eval` again against other reports/instances adds further rows to the same experiment for side-by-side
-comparison.
+`mlflow-eval` again against other instances adds further rows to the same experiment for side-by-side comparison.
 
-### Recording runs into the MLflow dataset (`mlflow_dataset` config)
+### Collecting completed runs (`mlflow-eval --collect`)
 
-By default, `harness` only writes the JSON agent-history report file (as before). To also (or instead) record each
-completed run as an entry in a persistent MLflow evaluation dataset — so it can later be evaluated with
-`--instance-id`/`--all` above, without needing to keep the JSON file around — add an `mlflow_dataset` block to the
-workflow config:
+Previously, a standalone `fluxnova-listener` background service watched an OTLP trace stream and continuously recorded
+completed runs into the MLflow dataset. That service has been retired: an OTel Collector can now export traces straight
+to MLflow's own `/v1/traces` endpoint, so MLflow *is* the trace store — nothing needs to run in the background to make
+that data queryable later. `mlflow-eval --collect` is a lightweight, on-demand pre-step run each time you want fresh
+data:
 
-```yaml
-mlflow_dataset:
-  enabled: true                                      # turn on recording (default: false)
-  name: loan-assessment-runs                          # optional; defaults to "fluxnova-<process_key>"
-  tracking_uri: sqlite:///harness/.mlflow/mlflow.db    # optional; defaults to the same store mlflow-eval uses
-  also_write_json_report: true                         # false = record to MLflow only, skip the JSON file
+1. Finds every `invoke_agent` trace for the config's `subprocess_id` in MLflow's trace store that isn't already recorded
+   (idempotent — skips runs already present, matched by `processInstanceId`).
+2. For each one, builds an agent-history report by joining that trace data with the static BPMN definition (system
+   prompt, tool input params) and the run's final process variables (read from Fluxnova's
+   `/history/variable-instance` API, which stays queryable long after the instance ends).
+3. Upserts the result into the persistent MLflow evaluation dataset (`fluxnova-<process_key>` by default).
+
+```bash
+mlflow-eval config/loan-assesment.yml --collect
 ```
 
-`harness` prints the dataset name and record ID (and the exact `mlflow-eval --instance-id ...` command to re-run)
-after each completed process instance. Records are shaped identically whether they come from a fresh `harness` run or an
-ad-hoc JSON report file, via the shared `fluxnova.mlflow_dataset` module, so results are consistent regardless of which
-evaluation mode you use.
-
-## OTel observability (`OtelClient`)
-
-Alongside the `/agent-history` REST-based flow above, the harness can also read GenAI run data (iteration/tool-call
-counts, tool spans, and — once content capture ships — LLM messages) straight out of the OTLP trace stream emitted by
-the `agentic-subprocess` plugin. This is **backend-agnostic**: it doesn't depend on whichever vendor (MLflow, Tempo,
-Jaeger, Datadog, ...) your OTel Collector happens to be configured to export traces to for visualisation — it reads the
-raw OTLP wire format via a small local receiver the harness runs itself. (Note: this is unrelated to the `mlflow-eval`
-evaluation suite above — MLflow here refers to a possible OTel trace-visualisation backend, not the GenAI evaluation
-tracking store.) See `harness/docs/deepeval-otel-gap-analysis.md` for the full rationale and
-`fluxnova-plugins/agentic-subprocess/docs/observability/GENAI_SEMCONV_ALIGNMENT.md` for the exact span/attribute shapes.
-
-### 1. Add a second exporter to your OTel Collector config
-
-Find your Collector's `config.yaml` (e.g. on Windows, if installed as a service:
-`C:\Program Files (x86)\OpenTelemetry Collector\config.yaml`) and add an
-`otlphttp/harness` exporter alongside whatever trace exporter (s) you already have (e.g. `otlphttp/mlflow`), then add it
-to the `traces` pipeline's `exporters` list — it's additive, so existing exporters keep working unchanged:
-
-```yaml
-exporters:
-  otlphttp/harness:
-    # Points at the harness's own local OTLP trace receiver (fluxnova.otel_receiver),
-    # not a visualisation backend.
-    traces_endpoint: http://localhost:4319/v1/traces
-    tls:
-      insecure: true
-
-service:
-  pipelines:
-    traces:
-      receivers: [ otlp, jaeger, zipkin ]
-      processors: [ batch ]
-      exporters: [ debug, otlphttp/mlflow, otlphttp/harness ]
+```
+--collect: processInstanceId=... -> recorded (record_id=...)
 ```
 
-Restart the Collector service after saving (e.g. `Restart-Service "OpenTelemetry Collector"`
-from an admin PowerShell — editing `config.yaml` itself also requires admin rights).
+You still need the OTel Collector configured to export directly to MLflow — add an `otlphttp` exporter pointing at
+MLflow's `/v1/traces` endpoint and restart the Collector. `--collect` requires `subprocess_id` to be set in the workflow
+config; the `mlflow_dataset.name`/`tracking_uri` config block (if present) is still honoured for where records get
+written.
 
-### 2. Run the harness's local OTLP receiver
+## Running the MLflow tracking server
+
+`mlflow-eval` can *read* the SQLite store directly (`sqlite:///harness/.mlflow/mlflow.db`), but for the OTel Collector
+to *write* traces into it, an actual MLflow tracking **server** (an HTTP process, not just the library) must be running
+and listening on the URL the Collector's `otlphttp` exporter targets (`http://localhost:5000/v1/traces` by default).
+`mlflow ui` alone does **not** accept incoming trace writes — it only reads.
+
+Start it (from the repo root, with `harness/.venv` activated) and leave it running in its own terminal for as long as
+you want traces to be captured:
 
 ```bash
 cd harness
-otel-receiver --port 4319 --store harness/.fluxnova/otel-spans.json
+.venv/Scripts/mlflow server --backend-store-uri sqlite:///.mlflow/mlflow.db --host 127.0.0.1 --port 5000
 ```
 
-Leave it running. It accepts `POST /v1/traces` OTLP/HTTP exports and appends each span as one JSON line to the store
-file.
+This single server also serves the browsable UI at [http://localhost:5000](http://localhost:5000), so once it's running
+you no longer need a separate `mlflow ui` process pointed at the same store.
 
-### 3. Drive a process run
+### As an IntelliJ Run/Debug Configuration
 
-Run the harness (or trigger the workflow however you normally do) so the plugin emits spans through the Collector to the
-receiver.
-
-### 4. Verify spans landed
-
-```bash
-Get-Content harness/.fluxnova/otel-spans.json -Tail 5
-```
-
-### 5. Query via `OtelClient`
-
-```python
-from fluxnova.otel_client import OtelClient
-
-client = OtelClient()  # defaults to harness/.fluxnova/otel-spans.json
-correlation_id = "<gen_ai.conversation.id, i.e. the process instance id>"
-
-client.get_invoke_agent_metrics(correlation_id)  # agent name, model, tokens, inference/tool-call counts, duration
-client.get_tool_call_spans(correlation_id)  # one entry per execute_tool span
-```
+1. **Run → Edit Configurations… → + → Python** (requires the Python plugin).
+2. **Name:** `MLflow Tracking Server`
+3. **Run** (instead of "Script path"): choose **Module name** and set it to `mlflow`, *or* set "Script path" to
+   `harness/.venv/Scripts/mlflow.exe` (Windows) / `harness/.venv/bin/mlflow` (macOS/Linux).
+4. **Parameters:**
+   ```
+   server --backend-store-uri sqlite:///.mlflow/mlflow.db --host 127.0.0.1 --port 5000
+   ```
+5. **Working directory:** `<repo root>/harness`
+6. **Python interpreter:** the `harness/.venv` interpreter (add it via **Add Interpreter → Existing** if not already
+   registered).
+7. Apply, then run this configuration before starting the OTel Collector or running `fluxnova-run` — leave it running in
+   the background for the duration of your session.
 
 ## Config file
 
@@ -420,3 +415,35 @@ after reviewing the BPMN's agent prompt and tool wiring:
 | LLM agent            | Ollama / llama3.2 (runs inside Fluxnova)                                                                                         |
 | Evaluation framework | [DeepEval](https://deepeval.com) or [MLflow GenAI evaluation](https://mlflow.org/docs/latest/genai/eval-monitor/) (alternatives) |
 | Judge model          | Ollama / llama3.2                                                                                                                |
+
+## Running the evaluations (DeepEval, deprecated)
+
+> `deep-eval` requires an agent-history JSON report file as input. Since `fluxnova-runner` no longer produces one
+> itself (see above), use `mlflow-eval` instead (below) unless you already have a report file from another source.
+
+```bash
+# Via the entry point (recommended — generates both the DeepEval score summary and an HTML report)
+deep-eval config/loan-assesment.yml \
+          .fluxnova/loanAssessmentProcess/<instanceId>.json
+```
+
+Two reports are written on every run (pass or fail):
+
+| Report                 | Location                                        |
+|------------------------|-------------------------------------------------|
+| DeepEval score summary | printed to terminal at end of session           |
+| HTML report            | `.fluxnova/<processKey>/<instanceId>-eval.html` |
+
+```bash
+# Via the deepeval CLI directly (also generates the DeepEval score summary)
+deepeval test run src/deep_eval/main.py \
+    --config config/loan-assesment.yml \
+    --report .fluxnova/loanAssessmentProcess/<instanceId>.json
+
+# Via pytest (HTML report only — no DeepEval score summary)
+pytest src/deep_eval/main.py -v \
+    --config config/loan-assesment.yml \
+    --report .fluxnova/loanAssessmentProcess/<instanceId>.json \
+    --html .fluxnova/loanAssessmentProcess/<instanceId>-eval.html \
+    --self-contained-html
+```

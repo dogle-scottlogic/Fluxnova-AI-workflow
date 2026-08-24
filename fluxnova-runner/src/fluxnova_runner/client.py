@@ -6,8 +6,8 @@ Provides only what the runner needs:
 - Claiming/completing user tasks (used indirectly via mock workers)
 - Polling until the instance completes
 
-(Read-back of agent-history/report data is the listener service's job — see
-``fluxnova_listener.client.ListenerClient``.)
+(Read-back of agent-history/report data is ``mlflow-eval --collect``'s job —
+see ``fluxnova_mlflow_dataset.fluxnova_client.FluxnovaClient``.)
 """
 
 import time

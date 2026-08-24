@@ -1,0 +1,223 @@
+"""Reads GenAI span data straight out of MLflow's own trace store.
+
+Replaces the previous ``fluxnova_listener`` design (a bespoke local OTLP/HTTP
+receiver + JSON-lines span store) now that the OTel Collector can export
+traces directly to MLflow's native OTLP endpoint (``/v1/traces``) and
+``mlflow.search_traces`` can read them straight back — no separate trace
+transport/storage layer needed on our side. See ``proposal.md`` for the
+rationale and GENAI_SEMCONV_ALIGNMENT.md for the span/attribute shapes this
+reads (``gen_ai.*`` semantic-convention attributes on ``invoke_agent``,
+``execute_tool`` and ``chat`` spans).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+import mlflow
+
+# Attribute set on every span by ``AgentOtelTracing`` — see
+# GENAI_SEMCONV_ALIGNMENT.md's "Source -> signal mapping" table.
+_OP_NAME_ATTR = "gen_ai.operation.name"
+_CONVERSATION_ID_ATTR = "gen_ai.conversation.id"
+_INVOKE_AGENT_OP = "invoke_agent"
+_EXECUTE_TOOL_OP = "execute_tool"
+_CHAT_OP = "chat"
+
+_DEFAULT_MAX_RESULTS = 5000
+
+
+class TraceStoreError(Exception):
+    """Raised when MLflow's trace store has no data (or incomplete data) for a run."""
+
+
+@dataclass
+class InvokeAgentMetrics:
+    """Data read off the ``invoke_agent`` span for one subprocess execution."""
+
+    agent_name: str | None
+    request_model: str | None
+    conversation_id: str | None
+    input_tokens: int | None
+    output_tokens: int | None
+    inference_calls: int | None
+    tool_calls: int | None
+    duration_ms: float | None
+
+
+@dataclass
+class ToolCallSpan:
+    """Data read off one ``execute_tool`` child span."""
+
+    tool_name: str | None
+    tool_call_id: str | None
+    agent_name: str | None
+    status: str
+    error_type: str | None
+    duration_ms: float | None
+
+
+@dataclass
+class ChatMessages:
+    """Input/output message content read off one ``chat`` span, in call order."""
+
+    model: str | None
+    input_messages: str | None
+    output_messages: str | None
+    start_time_unix_nano: int
+
+
+class MlflowTraceReader:
+    """Reads GenAI spans for completed agent runs out of an MLflow experiment's traces.
+
+    Args:
+        tracking_uri: The MLflow tracking URI traces were exported into (the
+                      same store the OTel Collector's ``otlphttp`` exporter
+                      points at).
+        experiment_id: Only traces logged against this experiment are considered.
+        max_results: Upper bound on how many traces to pull per query.
+    """
+
+    def __init__(
+        self,
+        tracking_uri: str,
+        experiment_id: str,
+        max_results: int = _DEFAULT_MAX_RESULTS,
+    ) -> None:
+        self._tracking_uri = tracking_uri
+        self._experiment_id = experiment_id
+        self._max_results = max_results
+        self._traces_cache: list[Any] | None = None
+
+    def find_completed_runs(self, agent_names: set[str]) -> list[tuple[str, str]]:
+        """Return ``(conversation_id, agent_name)`` for every ``invoke_agent`` span
+        across the experiment's traces whose ``gen_ai.agent.name`` is in ``agent_names``.
+
+        A span only ever appears once its subprocess has ended (spans are
+        exported/appended on span-end), so presence here already means
+        "completed" — no separate polling of the Fluxnova engine is needed
+        to detect completion.
+        """
+        runs: list[tuple[str, str]] = []
+        for span in self._all_spans():
+            if span.get_attribute(_OP_NAME_ATTR) != _INVOKE_AGENT_OP:
+                continue
+            agent_name = span.get_attribute("gen_ai.agent.name")
+            conversation_id = span.get_attribute(_CONVERSATION_ID_ATTR)
+            if agent_name in agent_names and conversation_id:
+                runs.append((conversation_id, agent_name))
+        return runs
+
+    def get_invoke_agent_metrics(self, correlation_id: str) -> InvokeAgentMetrics:
+        """Return iteration/tool-call counts, tokens, and duration for one run.
+
+        Args:
+            correlation_id: The process instance id — matches ``gen_ai.conversation.id``
+                             on the run's ``invoke_agent`` span.
+        """
+        spans = self._spans_for_correlation_id(correlation_id)
+        span = self._find_span(spans, operation_name=_INVOKE_AGENT_OP)
+        if span is None:
+            raise TraceStoreError(
+                f"No invoke_agent span found for correlation id '{correlation_id}'"
+            )
+        return InvokeAgentMetrics(
+            agent_name=span.get_attribute("gen_ai.agent.name"),
+            request_model=span.get_attribute("gen_ai.request.model"),
+            conversation_id=span.get_attribute(_CONVERSATION_ID_ATTR),
+            input_tokens=span.get_attribute("gen_ai.usage.input_tokens"),
+            output_tokens=span.get_attribute("gen_ai.usage.output_tokens"),
+            inference_calls=span.get_attribute("gen_ai.invoke_agent.inference_calls"),
+            tool_calls=span.get_attribute("gen_ai.invoke_agent.tool_calls"),
+            duration_ms=_duration_ms(span),
+        )
+
+    def get_tool_call_spans(self, correlation_id: str) -> list[ToolCallSpan]:
+        """Return one ``ToolCallSpan`` per ``execute_tool`` child span for the run."""
+        spans = self._spans_for_correlation_id(correlation_id)
+        return [
+            ToolCallSpan(
+                tool_name=span.get_attribute("gen_ai.tool.name"),
+                tool_call_id=span.get_attribute("gen_ai.tool.call.id"),
+                agent_name=span.get_attribute("gen_ai.agent.name"),
+                status=_status_str(span),
+                error_type=span.get_attribute("error.type"),
+                duration_ms=_duration_ms(span),
+            )
+            for span in spans
+            if span.get_attribute(_OP_NAME_ATTR) == _EXECUTE_TOOL_OP
+        ]
+
+    def get_llm_messages(self, correlation_id: str) -> list[ChatMessages]:
+        """Return each ``chat`` span's input/output messages, ordered by call time."""
+        spans = self._spans_for_correlation_id(correlation_id)
+        chat_spans = sorted(
+            (s for s in spans if s.get_attribute(_OP_NAME_ATTR) == _CHAT_OP),
+            key=lambda s: s.start_time_ns or 0,
+        )
+        return [
+            ChatMessages(
+                model=span.get_attribute("gen_ai.request.model"),
+                input_messages=span.get_attribute("gen_ai.input.messages"),
+                output_messages=span.get_attribute("gen_ai.output.messages"),
+                start_time_unix_nano=span.start_time_ns or 0,
+            )
+            for span in chat_spans
+        ]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _spans_for_correlation_id(self, correlation_id: str) -> list[Any]:
+        """Return every span in any trace containing a span tagged with this correlation id."""
+        matching_traces = [
+            trace
+            for trace in self._search_traces()
+            if any(
+                span.get_attribute(_CONVERSATION_ID_ATTR) == correlation_id
+                for span in trace.data.spans
+            )
+        ]
+        if not matching_traces:
+            raise TraceStoreError(
+                f"No traces found for correlation id '{correlation_id}' in experiment "
+                f"{self._experiment_id}. Has the collector delivered this run's traces "
+                "to MLflow yet?"
+            )
+        return [span for trace in matching_traces for span in trace.data.spans]
+
+    def _all_spans(self) -> list[Any]:
+        return [span for trace in self._search_traces() for span in trace.data.spans]
+
+    def _search_traces(self) -> list[Any]:
+        if self._traces_cache is None:
+            mlflow.set_tracking_uri(self._tracking_uri)
+            self._traces_cache = mlflow.search_traces(
+                experiment_ids=[self._experiment_id],
+                max_results=self._max_results,
+                return_type="list",
+            )
+        return self._traces_cache
+
+    @staticmethod
+    def _find_span(spans: list[Any], operation_name: str) -> Any | None:
+        for span in spans:
+            if span.get_attribute(_OP_NAME_ATTR) == operation_name:
+                return span
+        return None
+
+
+def _status_str(span: Any) -> str:
+    status_code = getattr(span, "status_code", None)
+    name = getattr(status_code, "name", status_code)
+    return "OK" if name == "OK" else "ERROR"
+
+
+def _duration_ms(span: Any) -> float | None:
+    start = getattr(span, "start_time_ns", None)
+    end = getattr(span, "end_time_ns", None)
+    if start is None or end is None:
+        return None
+    return (end - start) / 1e6

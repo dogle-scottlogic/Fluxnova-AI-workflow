@@ -1,9 +1,9 @@
 """Thin adapter over the shared ``fluxnova_mlflow_dataset`` package.
 
-The actual record-shaping/read/write logic lives in the standalone
-``fluxnova-mlflow-dataset`` package (also used by the ``fluxnova_listener``
-service). This module just adapts it to accept a harness ``WorkflowConfig``
-object, so the existing ``mlflow_eval.main`` call sites don't need to change.
+The actual record-shaping/read/write/collect logic lives in the standalone
+``fluxnova-mlflow-dataset`` package. This module just adapts it to accept a
+harness ``WorkflowConfig`` object, so the existing ``mlflow_eval.main`` call
+sites don't need to change.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-"""Minimal read-only Fluxnova REST API client used by the listener service.
+"""Minimal read-only Fluxnova REST API client used by the ``collect`` step.
 
-The listener never deploys or starts processes (that's ``fluxnova_runner``'s
+Collection never deploys or starts processes (that's ``fluxnova_runner``'s
 job) — it only needs to read back a completed instance's final variables,
-which the OTLP trace store doesn't carry (only span/tool-call data does).
+which MLflow's trace store doesn't carry (only span/tool-call data does).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ class ApiError(Exception):
     """Raised when the Fluxnova REST API returns an unexpected response."""
 
 
-class ListenerClient:
+class FluxnovaClient:
     """Thin, read-only wrapper around the Fluxnova Engine REST API."""
 
     def __init__(
