@@ -11,6 +11,7 @@ permissive "trace" bucket we deliberately avoid the reserved key name
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -50,6 +51,23 @@ def tracking_uri_for(tracking_uri_override: str | None, repo_root: Path) -> str:
     return tracking_uri_override or default_tracking_uri(repo_root)
 
 
+def _stringify_output(final_output: str | dict[str, Any] | list[Any] | None) -> str | None:
+    """Normalise a run's final output to a plain string (or ``None``).
+
+    The MLflow evaluation dataset's ``outputs`` field is schema-locked to a
+    single scalar type on first write. Our OTel-sourced ``final_output`` is
+    usually a plain string, but when the agent's last message is pure JSON
+    (e.g. a bare tool-call), the GenAI span attribute is sometimes captured
+    as a structured ``dict``/``list`` instead of text — writing that
+    unmodified would crash ``EvaluationDataset.merge_records`` once the
+    dataset's ``outputs`` schema has already been inferred as ``"string"``
+    from an earlier text-valued record.
+    """
+    if final_output is None or isinstance(final_output, str):
+        return final_output
+    return json.dumps(final_output)
+
+
 # ---------------------------------------------------------------------------
 # Record building
 # ---------------------------------------------------------------------------
@@ -62,7 +80,7 @@ def build_mlflow_record(
     input_variables: dict[str, Any],
     tool_calls: list[dict[str, Any]],
     iterations: int | None,
-    final_output: str | None,
+    final_output: str | dict[str, Any] | list[Any] | None,
     available_tools: list[str],
     expected_tool_rules: list[ExpectedToolRule],
     dataset_path: Path | None,
@@ -84,7 +102,7 @@ def build_mlflow_record(
             "available_tools": available_tools,
             "expected_tools": resolve_expected_tools(expected_tool_rules, input_variables),
         },
-        "outputs": final_output,
+        "outputs": _stringify_output(final_output),
         "expectations": {
             "expected_output": golden["expected_output"] if golden else None,
         },

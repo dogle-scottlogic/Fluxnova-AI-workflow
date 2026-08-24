@@ -49,17 +49,17 @@ This project is split into three independent Python packages:
 │     → Fluxnova engine     │        └───────────────────┬──────────────────┘
 │  2. Start process         │                            │ OTLP
 │     instance with input   │                            ▼
-│     variables             │                  ┌────────────────────┐
-│  3. Run mock external-    │                  │   OTel Collector   │
-│     task workers          │                  └──────────┬─────────┘
-│  4. Poll until process    │                             │ otlphttp exporter
-│     completes             │                             ▼
-│                           │                  ┌────────────────────────────┐
-└───────────────────────────┘                  │  MLflow  /v1/traces        │
-                                               │  (trace store)             │
-                                               └──────────────┬─────────────┘
-                                                              │ mlflow.search_traces()
-                                                              ▼
+│     variables             │                 ┌────────────────────┐
+│  3. Run mock external-    │                 │   OTel Collector   │
+│     task workers          │                 └──────────┬─────────┘
+│  4. Poll until process    │                            │ otlphttp exporter
+│     completes             │                            ▼
+│                           │              ┌────────────────────────────┐
+└───────────────────────────┘              │  MLflow  /v1/traces        │
+                                           │  (trace store)             │
+                                           └──────────────┬─────────────┘
+                                                          │ mlflow.search_traces()
+                                                          ▼
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │  mlflow-eval CLI  --collect  (on-demand pre-step; no background service)            │
 │                                                                                     │
@@ -171,7 +171,7 @@ primary)" and "Collecting completed runs" below for the other modes (`--all`, `-
 
 ## Running the evaluations (MLflow, primary)
 
-`mlflow-eval` is the primary evaluation suite (`deep-eval` above is deprecated) — same config YAML, same underlying
+`mlflow-eval` is the primary evaluation suite (`deep-eval` is deprecated) — same config YAML, same underlying
 Ollama/llama3.2 judge model, but scored with `mlflow.genai.evaluate` scorers. It supports:
 
 ```bash
@@ -205,11 +205,8 @@ Then open [http://localhost:5000](http://localhost:5000) and open the `fluxnova-
 
 ### Collecting completed runs (`mlflow-eval --collect`)
 
-Previously, a standalone `fluxnova-listener` background service watched an OTLP trace stream and continuously recorded
-completed runs into the MLflow dataset. That service has been retired: an OTel Collector can now export traces straight
-to MLflow's own `/v1/traces` endpoint, so MLflow *is* the trace store — nothing needs to run in the background to make
-that data queryable later. `mlflow-eval --collect` is a lightweight, on-demand pre-step run each time you want fresh
-data:
+An OTel Collector exports traces straight to MLflow's own `/v1/traces` endpoint, so MLflow is the trace store.
+`mlflow-eval --collect` is a lightweight, on-demand pre-step run each time you want fresh data:
 
 1. Finds every `invoke_agent` trace for the config's `subprocess_id` in MLflow's trace store that isn't already recorded
    (idempotent — skips runs already present, matched by `processInstanceId`).
@@ -264,6 +261,12 @@ you no longer need a separate `mlflow ui` process pointed at the same store.
    registered).
 7. Apply, then run this configuration before starting the OTel Collector or running `fluxnova-run` — leave it running in
    the background for the duration of your session.
+
+## Local development with Podman (Fluxnova + OTel Collector + MLflow)
+
+See [`local-dev/README.md`](local-dev/README.md) for running the Fluxnova engine, the OTel Collector, and (optionally)
+the MLflow tracking server as containers for local development with Podman (or Docker) — including prerequisites, a
+Compose-based option and a Podman-pod alternative, an optional MLflow pod, and troubleshooting notes.
 
 ## Config file
 
