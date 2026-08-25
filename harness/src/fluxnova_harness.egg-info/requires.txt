@@ -9,5 +9,5 @@ pytest-html>=4.0
 ruff>=0.5
 deepeval>=2.0
 ollama>=0.3
-mlflow>=2.18
+mlflow[genai]>=3.15
 litellm>=1.55

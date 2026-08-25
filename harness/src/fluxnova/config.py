@@ -81,6 +81,7 @@ class MlflowDatasetConfig:
     name: str | None = None
     tracking_uri: str | None = None
     also_write_json_report: bool = True
+    experiment_name: str | None = None
 
 
 @dataclass
@@ -130,6 +131,7 @@ class WorkflowConfig:
                 name=raw_mlflow_dataset.get("name"),
                 tracking_uri=raw_mlflow_dataset.get("tracking_uri"),
                 also_write_json_report=raw_mlflow_dataset.get("also_write_json_report", True),
+                experiment_name=raw_mlflow_dataset.get("experiment_name"),
             )
             if raw_mlflow_dataset
             else None

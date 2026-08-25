@@ -88,6 +88,10 @@
           "type": "boolean",
           "description": "Whether to also write the usual JSON agent-history report file. Set false to write only to the MLflow dataset.",
           "default": true
+        },
+        "experiment_name": {
+          "type": "string",
+          "description": "MLflow experiment name to target. Defaults to 'fluxnova-<process_key>'. Set to easily point runs/records at a different experiment without changing any other config."
         }
       }
     }

@@ -1,99 +1,63 @@
 # Local development: Fluxnova + OTel Collector + MLflow (Podman)
 
 This directory contains everything needed to run the **Fluxnova engine**, the **OTel Collector**, and (optionally)
-the **MLflow tracking server** as containers for local development, using [Podman](https://podman.io) — Docker also
-works for the Compose-based option, since that file is a standard Compose file.
-
-Two ways to start Fluxnova + the OTel Collector are provided — pick whichever fits your workflow (see "Compose vs.
-pod" below):
-
-- **Compose** (`docker-compose.yml`) — the standard, portable option; needs a compose provider installed.
-- **A single Podman pod** (`pod-up.sh` / `pod-down.sh`) — no compose provider needed, just `podman` itself.
-
-MLflow can also be run as its own container/pod (`mlflow-pod-up.sh` / `mlflow-pod-down.sh`) instead of a host process.
+the **MLflow tracking server** as containers for local development, using [Podman](https://podman.io) — grouped into
+a single Podman pod per service (`fluxnova-up.sh` / `fluxnova-down.sh` for Fluxnova + the OTel Collector, and
+`mlflow-up.sh` / `mlflow-down.sh` for MLflow), with no compose provider required.
 
 ## Prerequisites
 
-- **[Podman](https://podman.io/docs/installation)** (or Docker) installed, with a running machine/VM on Windows and
-  macOS (`podman machine init && podman machine start`) — not needed on Linux.
-- **A compose provider** so `podman compose ...` works — Podman itself doesn't bundle one. Install `podman-compose`:
-  ```bash
-  pip install podman-compose --user
-  ```
-  then make sure the install location is on your `PATH` (e.g. on Windows,
-  `%APPDATA%\Python\Python3xx\Scripts`; on macOS/Linux, `~/.local/bin`). Verify with:
-  ```bash
-  podman compose version
-  ```
-  (Docker Desktop users already have `docker compose` built in — no separate install needed.) Not needed if you're
-  only using the pod scripts below.
+- **[Podman](https://podman.io/docs/installation)** installed, with a running machine/VM on Windows and macOS
+  (`podman machine init && podman machine start`) — not needed on Linux.
 - **A locally built/loaded Fluxnova image** — this isn't published anywhere. Build it from the eval fork using the
   readme instructions (LINK TODO), or `podman load -i <fluxnova image tarball>`.
 - **The MLflow tracking server running** (either on the host — see the main README's "Running the MLflow tracking
   server" — or as the `mlflow-local` pod below) — the OTel Collector sends traces to it via `host.containers.internal`.
 
-## Option A: Compose
+## Starting Fluxnova + the OTel Collector
+
+`fluxnova-up.sh` starts both containers grouped in a single **Podman pod**. Run it from **Git Bash** on Windows (see
+the main README's "A note on shells (Windows)").
 
 ```bash
 cd local-dev
-cp .env.example .env
-# edit .env: set FLUXNOVA_IMAGE to your locally built/loaded Fluxnova image
+# adjust .env: set FLUXNOVA_IMAGE to your locally built/loaded Fluxnova image
 
-podman compose up -d      # or: docker compose up -d
-podman compose logs -f    # tail both containers
-podman compose down       # stop and remove them
+./fluxnova-up.sh      # start the pod
+./fluxnova-down.sh    # stop and remove it
 ```
 
-This starts:
+This creates a `fluxnova-local` pod publishing ports `8080` (Fluxnova), `4317`/`4318` (OTel Collector gRPC/HTTP).
+Both containers share one network namespace, so they reach each other via `localhost` rather than by container name
+— that's why `default.yml` (mounted by the pod script) points `exporterEndpoint` at `http://localhost:4317`.
 
 - **`fluxnova`** — the Fluxnova engine, published on `http://localhost:8080` (matching `fluxnova_url` in the harness
   config files), with `OTEL_EXPORTER_OTLP_ENDPOINT` pointed at the collector container.
 - **`otel-collector`** — an `otlp` receiver (gRPC `4317` / HTTP `4318`, also published to the host) piped through an
-  `otlphttp` exporter to the MLflow tracking server (`http://host.containers.internal:5000`, auto-suffixed with
-  `/v1/traces`). Make sure the MLflow tracking server is already running before starting the stack.
+  `otlphttp` exporter to the MLflow tracking server (`http://host.containers.internal:5000` or the shared
+  `fluxnova-dev` network's `mlflow-local` pod, auto-suffixed with `/v1/traces`). Make sure the MLflow tracking server
+  is already running before starting the pod.
 
-See `docker-compose.yml`, `otel-collector-config.yaml`, and `.env.example` for details and adjust image names, ports,
-or the collector pipeline as your actual Fluxnova image requires.
+See `default.yml` and `otel-collector-config.yaml` for details and adjust image names, ports, or the collector
+pipeline as your actual Fluxnova image requires.
 
-## Option B: a single Podman pod (no Compose provider needed)
-
-`pod-up.sh` starts the same two containers grouped in a single **Podman pod** instead — a Podman/Kubernetes-native
-alternative to Compose's per-service containers + bridge network. Run it from **Git Bash** on Windows (see the main
-README's "A note on shells (Windows)").
-
-```bash
-cd local-dev
-cp .env.example .env
-# edit .env: set FLUXNOVA_IMAGE to your locally built/loaded Fluxnova image
-
-./pod-up.sh      # start the pod
-./pod-down.sh    # stop and remove it
-```
-
-This creates a `fluxnova-local` pod publishing ports `8080` (Fluxnova), `4317`/`4318` (OTel Collector gRPC/HTTP), with
-both containers sharing one network namespace — so, unlike the Compose setup, they reach each other via `localhost`
-rather than by service name. That's why `default-pod.yml` (mounted by the pod script, in place of `default.yml`)
-points `exporterEndpoint` at `http://localhost:4317` instead of `http://otel-collector:4317`. Everything else (image,
-ports, MLflow requirement) is identical to the Compose setup above.
-
-**Compose vs. pod:** Compose is more portable (the same file also works with Docker, e.g. in CI) and needs no extra
-tooling beyond a compose provider; the pod script needs only `podman` itself (no compose provider to install) and
-mirrors Kubernetes Pod networking more closely, at the cost of a bespoke script instead of a standard, widely
-recognised file format. Pick whichever fits your workflow — both start the same two containers.
+Once Fluxnova responds, `fluxnova-up.sh` opens the Fluxnova web UI (`/fluxnova-welcome/index.html`) in your default
+browser automatically — same behaviour as `mlflow-up.sh` below, including the `localhost`-unreachable fallback
+(see "Troubleshooting"). Set `FLUXNOVA_OPEN_BROWSER=false` to skip the auto-open.
 
 ## Optional: run the MLflow tracking server in its own Podman pod
 
-`mlflow-pod-up.sh` / `mlflow-pod-down.sh` run the MLflow tracking server (see the main README's "Running the MLflow
+`mlflow-up.sh` / `mlflow-down.sh` run the MLflow tracking server (see the main README's "Running the MLflow
 tracking server") as a container instead of a host process, as its own single-container `mlflow-local` pod — kept
 separate from `fluxnova-local` since it's a longer-lived dev service you likely want to start/stop independently of
 any one Fluxnova run. Run from **Git Bash**:
 
 ```bash
 cd local-dev
-cp .env.example .env   # if you haven't already; adjust MLFLOW_IMAGE/MLFLOW_PORT/MLFLOW_BACKEND_STORE_DIR if needed
+# adjust .env if you haven't already; set MLFLOW_IMAGE/MLFLOW_PORT/MLFLOW_BACKEND_STORE_DIR if needed
 
-./mlflow-pod-up.sh      # start it
-./mlflow-pod-down.sh    # stop and remove it (the SQLite backend store on disk is untouched)
+./mlflow-up.sh      # start it
+./mlflow-down.sh    # stop and remove it (the SQLite backend store on disk is untouched)
 ```
 
 This uses the official `ghcr.io/mlflow/mlflow` image, bind-mounting `harness/.mlflow` (the same path already used by
@@ -102,7 +66,7 @@ can freely switch between running MLflow as a host process and as this container
 exporter (`http://host.containers.internal:5000`) reaches it exactly as it would a host-run server, since the pod's
 port is published to the host either way.
 
-Once the container is up, `mlflow-pod-up.sh` waits for it to respond, then opens the UI in your default browser
+Once the container is up, `mlflow-up.sh` waits for it to respond, then opens the UI in your default browser
 automatically (see "Troubleshooting" below for what it does if `localhost` isn't reachable). Set
 `MLFLOW_OPEN_BROWSER=false` to skip the auto-open.
 
@@ -116,7 +80,7 @@ reproduced consistently in testing even across a full `wsl --shutdown` + restart
 Python server plus this Windows/WSL2 networking configuration, not a bug in the pod script or the MLflow image
 itself.
 
-`mlflow-pod-up.sh` handles this automatically: if `http://localhost:$MLFLOW_PORT` doesn't respond within a few
+`mlflow-up.sh` handles this automatically: if `http://localhost:$MLFLOW_PORT` doesn't respond within a few
 seconds, it looks up the Podman machine's own IP (`wsl -d podman-machine-default -- ip -4 addr show eth0`), checks
 that it's reachable, and uses it instead — both for the printed URLs and for the browser it opens. If you're doing
 this manually (e.g. pointing the OTel Collector's `otlphttp` exporter somewhere), the same commands are:
@@ -126,17 +90,108 @@ wsl -d podman-machine-default -- ip -4 addr show eth0   # note the inet address,
 curl http://<that-ip>:5000/version                       # works even when localhost:5000 doesn't
 ```
 
-That IP can change on VM restart, so re-run `mlflow-pod-up.sh` (or the `wsl` command above) if it stops working. If
+That IP can change on VM restart, so re-run `mlflow-up.sh` (or the `wsl` command above) if it stops working. If
 you don't hit this on your machine, `http://localhost:5000` works as documented above.
+
+## MLflow AI Gateway endpoint for automatic evaluation judges
+
+MLflow's built-in AI Gateway (`http://localhost:5000/#/gateway`, part of the same `mlflow-local` pod/server — no
+separate service to run) is required for **automatic evaluation** judges (`Scorer.register()` + `Scorer.start()`),
+which — unlike offline/EDD judges — must reference a `gateway:/<endpoint-name>` model URI rather than calling Ollama
+directly. Here's how to reproduce a working local `fluxnova-judge` endpoint backed by Ollama:
+
+1. Make sure `mlflow-local` is running (`./mlflow-up.sh`) with the `--add-host host.containers.internal:host-gateway`
+   flag included at pod-create time (already the default in this script) — without it, the container can't reach a
+   host-run Ollama server at all.
+2. Open `http://localhost:5000/#/gateway` and click **Create Endpoint**.
+3. Name it `fluxnova-judge`, select provider **Ollama**.
+4. Pick a model from the picker — at time of writing only `llama3.1` was offered here even though `llama3.2` was
+   already pulled locally (`ollama list`); `llama3.1` works fine and is what this repo's example endpoint uses. Note
+   this means the automatic-evaluation judge model may differ from whatever `ollama/llama3.2` model the existing
+   hand-rolled `_llm_judge()` offline scorers use, unless reconciled later.
+5. Create a new connection for it:
+   - **Base URL**: `http://host.containers.internal:11434/v1` — the `/v1` suffix is required. MLflow's
+     `OllamaProvider` appends `/chat/completions` directly onto whatever base URL is configured, with no separate
+     `/v1` insertion, so omitting it causes every request to 404 (you'll see Ollama's own literal
+     `{"detail":{"message":"404 page not found"}}` body passed through — this looks like an MLflow failure at first
+     glance but is actually Ollama's router rejecting the wrong path).
+   - **API key name/value**: any placeholder (e.g. `OLLAMA_API_KEY` / `unused`) — local Ollama needs no real
+     authentication, but the UI form requires something be entered.
+6. Save. There's no in-place "edit the base URL" option once an endpoint/connection is created in this MLflow
+   version — to fix a mistake, delete and recreate rather than editing.
+7. Verify with the OpenAI-compatible unified endpoint (works with `curl` or the OpenAI Python SDK):
+   ```python
+   from openai import OpenAI
+
+   client = OpenAI(
+       base_url="http://localhost:5000/gateway/mlflow/v1",
+       api_key="unused",  # not validated for a local Ollama-backed endpoint
+   )
+   response = client.chat.completions.create(
+       model="fluxnova-judge",  # the endpoint name, not the underlying Ollama model name
+       messages=[{"role": "user", "content": "How are you?"}],
+   )
+   print(response.choices[0].message)
+   ```
+   A real completion coming back (rather than a 404/500) confirms the endpoint is wired up correctly.
+
+## Toggling automatic evaluation judges on/off
+
+Once the `fluxnova-judge` gateway endpoint exists (see above), use the `mlflow-judges` CLI (installed alongside
+`mlflow-eval` — run `pip install -e .` in `harness/` after pulling if it's missing) to register and toggle automatic
+judges for a given experiment. It targets every judge returned by `mlflow_eval.main.automatic_judges()` (currently
+`decision_quality`):
+
+```bash
+# Register + start automatic sampling (registers on first run automatically)
+mlflow-judges --experiment fluxnova-loanAssessmentProcess start --sample-rate 0.1
+
+# Stop sampling (judge stays registered; cheap to restart later)
+mlflow-judges --experiment fluxnova-loanAssessmentProcess stop
+
+# Show current registration/sampling state
+mlflow-judges --experiment fluxnova-loanAssessmentProcess status
+```
+
+`--tracking-uri` defaults to `http://localhost:5000` (the running `mlflow-local` server) — this **must** be an
+HTTP(S) address, not a direct `sqlite:///...` path, because gateway-backed judges route through the server process
+itself. Add `--filter-string` to `start` to restrict which traces get scored (e.g. to exclude EDD regression runs).
+
+## Targeting a different MLflow experiment
+
+By default, workflow runs/records use a single experiment named `fluxnova-<process_key>` (e.g.
+`fluxnova-loanAssessmentProcess`) — no dev/prod split (a `dev`/`prod` environment-suffix scheme was tried and then
+reverted; not needed for this demo's scope). To point at a different experiment without changing any code, set an
+explicit override in the workflow config:
+
+```yaml
+mlflow_dataset:
+  enabled: true
+  experiment_name: fluxnova-loanAssessmentProcess-demo   # any name you like
+```
+
+If omitted, it defaults to `fluxnova-<process_key>` as before — existing configs don't need any changes.
+
+If you need to rename an existing experiment/dataset in place (e.g. after changing this override), use:
+
+```python
+import mlflow
+
+mlflow.set_tracking_uri("sqlite:///harness/.mlflow/mlflow.db")
+client = mlflow.MlflowClient()
+client.rename_experiment("<experiment_id>", "<new-name>")
+```
+
+`mlflow.genai.datasets.EvaluationDataset` has no public rename API — if needed, update the `name` column directly in
+the `evaluation_datasets` table of the SQLite tracking store instead (safe for local dev data; the `dataset_id`,
+schema, and records are untouched, only the lookup name changes).
 
 ## Files
 
-| File | Used by | Purpose |
-|------|---------|---------|
-| `docker-compose.yml` | Option A | Compose definition for `fluxnova` + `otel-collector` |
-| `pod-up.sh` / `pod-down.sh` | Option B | Start/stop the `fluxnova-local` pod |
-| `mlflow-pod-up.sh` / `mlflow-pod-down.sh` | Optional MLflow pod | Start/stop the `mlflow-local` pod |
-| `default.yml` | Option A | Fluxnova config mounted by Compose (OTel plugin → `otel-collector:4317`) |
-| `default-pod.yml` | Option B | Same as `default.yml`, but OTel plugin → `localhost:4317` (shared pod network namespace) |
-| `otel-collector-config.yaml` | Options A & B | OTel Collector pipeline: `otlp` receiver → `otlp_http` exporter to MLflow |
-| `.env.example` | All | Template — copy to `.env` and adjust image names/ports/paths |
+| File | Purpose |
+|------|---------|
+| `fluxnova-up.sh` / `fluxnova-down.sh` | Start/stop the `fluxnova-local` pod (Fluxnova + OTel Collector) |
+| `mlflow-up.sh` / `mlflow-down.sh` | Start/stop the `mlflow-local` pod |
+| `default.yml` | Fluxnova config mounted by `fluxnova-up.sh` (OTel plugin → `localhost:4317`, shared pod network namespace) |
+| `otel-collector-config.yaml` | OTel Collector pipeline: `otlp` receiver → `otlp_http` exporter to MLflow |
+| `.env` | Environment values (image names/ports/paths) — adjust as needed |

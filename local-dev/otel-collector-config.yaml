@@ -5,11 +5,20 @@
 # straight to the MLflow tracking server's native OTLP endpoint, per the main
 # README's architecture (OTel Collector -> MLflow /v1/traces -> mlflow-eval --collect).
 #
-# `host.containers.internal` resolves to the host machine from inside the container
-# (wired up via `extra_hosts` in docker-compose.yml, or `--add-host` in pod-up.sh) —
-# that's where the MLflow tracking server should be listening, whether that's a host-run
-# `mlflow server ...` process (see the main README) or the mlflow-local pod
-# (mlflow-pod-up.sh), whose port is published to the host either way.
+# `mlflow-local` here is the pod name of the MLflow tracking server (mlflow-up.sh),
+# resolved via the shared `fluxnova-dev` user-defined network both pod scripts attach to
+# — sibling pods don't share a network namespace, and host.containers.internal doesn't
+# work for pod-to-pod traffic (it resolves to the gateway *out* of the Podman VM, not
+# back into it). Podman's aardvark-dns resolves by *pod* name here, not container name.
+# MLFLOW_OTLP_ENDPOINT is set per-scenario by fluxnova-up.sh — defaults to
+# `http://mlflow-local:5000` (the mlflow-local pod), or override in .env to
+# `http://host.containers.internal:5000` for a host-run MLflow instead.
+#
+# MLflow's OTLP endpoint requires an `x-mlflow-experiment-id` header on every request
+# (see https://mlflow.org/docs/latest/genai/tracing/opentelemetry/ingest/) — it's the
+# *numeric* experiment ID (not the name), and the experiment must already exist. Set
+# MLFLOW_EXPERIMENT_ID in .env (fluxnova-up.sh passes it through as an env var here) — see
+# local-dev/README.md for how to look this ID up.
 
 receivers:
   otlp:
@@ -25,9 +34,11 @@ processors:
 exporters:
   # otlp_http automatically appends /v1/traces to this base endpoint.
   otlp_http:
-    endpoint: http://host.containers.internal:5000
+    endpoint: ${env:MLFLOW_OTLP_ENDPOINT}
     tls:
       insecure: true
+    headers:
+      x-mlflow-experiment-id: ${env:MLFLOW_EXPERIMENT_ID}
 
   debug:
     verbosity: basic

@@ -47,7 +47,7 @@ from typing import Any
 import mlflow
 from fluxnova_mlflow_dataset import collect_new_runs
 from mlflow.entities import Feedback
-from mlflow.genai.scorers import scorer
+from mlflow.genai.scorers import Guidelines, scorer
 
 from fluxnova.config import WorkflowConfig
 from fluxnova.mlflow_dataset import (
@@ -59,6 +59,11 @@ from fluxnova.mlflow_dataset import (
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _JUDGE_MODEL = "ollama/llama3.2"
+
+# MLflow-native judges (e.g. Guidelines) use MLflow's own "<provider>:/<model>"
+# URI scheme, which differs from the litellm-style "<provider>/<model>" used by
+# the bespoke `_llm_judge()` helper below. Same underlying local Ollama model.
+_NATIVE_JUDGE_MODEL = "ollama:/llama3.2"
 
 # Tool -> BPMN camunda:inputParameter names (see bpmn/loan-assesment.bpmn),
 # used to validate that each tool call received the arguments the process
@@ -170,17 +175,43 @@ def tool_argument_correctness(inputs: dict) -> Feedback:
     return Feedback(value=score, rationale=rationale)
 
 
-@scorer
-def decision_quality(inputs: dict, outputs: str) -> Feedback:
-    """Final output must contain a clear, justified APPROVE or REJECT recommendation."""
-    criteria = (
-        "Determine whether the agent's final output reaches a definitive APPROVE or REJECT "
-        "lending recommendation backed by the evidence it gathered. Penalise vague conclusions, "
-        "deferred decisions ('next steps required'), or missing justification. Reward outputs "
-        "that cite specific data points (credit score, fraud risk, affordability result, "
-        "employment status) and state a clear recommendation."
-    )
-    return _llm_judge(criteria, {"goal": inputs["agent_goal"], "final_output": outputs})
+# MLflow-native rewrite of the old `_llm_judge`-based decision_quality scorer,
+# using the built-in `Guidelines` judge (see Phase 2 of
+# EDD-AND-PRODUCTION-EVAL-ANALYSIS.md). Guidelines judges every trace's
+# `outputs` (no golden data needed) and is directly usable for automatic
+# (online) evaluation once pointed at a `gateway:/<endpoint>` model.
+_DECISION_QUALITY_GUIDELINES = [
+    "The final output must reach a definitive APPROVE or REJECT lending recommendation. "
+    "Vague conclusions or deferred decisions such as 'next steps required' do not satisfy "
+    "this guideline.",
+    "The final output must state its recommendation backed by evidence: it must cite "
+    "specific data points gathered during the assessment, such as credit score, fraud "
+    "risk, affordability result, or employment status.",
+]
+
+decision_quality = Guidelines(
+    name="decision_quality",
+    guidelines=_DECISION_QUALITY_GUIDELINES,
+    model=_NATIVE_JUDGE_MODEL,
+)
+
+# Automatic (online) evaluation -- Scorer.register()/.start() -- requires a
+# `gateway:/<endpoint-name>` model URI rather than calling Ollama directly
+# (see Phase 0 in EDD-AND-PRODUCTION-EVAL-ANALYSIS.md), so the judges used
+# there are separate instances from the offline `_SCORERS` list above, built
+# on demand by `mlflow_eval.judges` (the start/stop toggle CLI).
+GATEWAY_JUDGE_MODEL = "gateway:/fluxnova-judge"
+
+
+def automatic_judges(model: str = GATEWAY_JUDGE_MODEL) -> list[Guidelines]:
+    """Build the gateway-backed judges usable with automatic (online) evaluation.
+
+    Currently just the one Phase-2 judge rewritten so far (`decision_quality`);
+    extend this list as more judges get rewritten as MLflow-native.
+    """
+    return [
+        Guidelines(name="decision_quality", guidelines=_DECISION_QUALITY_GUIDELINES, model=model),
+    ]
 
 
 @scorer
@@ -404,6 +435,7 @@ def _collect(config: WorkflowConfig, tracking_uri: str) -> None:
         expected_tool_rules=config.expected_tools,
         dataset_path=config.dataset_path,
         dataset_name=config.mlflow_dataset.name if config.mlflow_dataset else None,
+        experiment_name=config.mlflow_dataset.experiment_name if config.mlflow_dataset else None,
         username=os.environ.get("FLUXNOVA_USERNAME"),
         password=os.environ.get("FLUXNOVA_PASSWORD"),
     )

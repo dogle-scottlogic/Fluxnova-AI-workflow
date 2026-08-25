@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # MLflow tracking server, run as its own single-container Podman pod — separate from
-# fluxnova-local (see pod-up.sh) so it can be started/stopped independently (it's a
+# fluxnova-local (see fluxnova-up.sh) so it can be started/stopped independently (it's a
 # long-lived dev service, not tied to any one Fluxnova run).
 #
 # This replaces the host-run `mlflow server ...` process described in the main README's
@@ -9,8 +9,8 @@
 # container see identical data.
 #
 # Usage (from this directory):
-#   ./mlflow-pod-up.sh
-#   ./mlflow-pod-down.sh
+#   ./mlflow-up.sh
+#   ./mlflow-down.sh
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
@@ -35,10 +35,20 @@ MLFLOW_PORT="${MLFLOW_PORT:-5000}"
 MLFLOW_BACKEND_STORE_DIR="${MLFLOW_BACKEND_STORE_DIR:-../harness/.mlflow}"
 mkdir -p "$MLFLOW_BACKEND_STORE_DIR"
 BACKEND_STORE_DIR_RESOLVED="$(cd "$MLFLOW_BACKEND_STORE_DIR" && pwd)"
+DEV_NETWORK="${DEV_NETWORK:-fluxnova-dev}"
+
+# Same shared network as fluxnova-up.sh's fluxnova-local pod, so the OTel Collector there can
+# reach this pod by container name (`mlflow`) — see fluxnova-up.sh for why host.containers.internal
+# doesn't work for pod-to-pod traffic on this machine.
+podman network create --ignore "$DEV_NETWORK"
 
 echo "Creating pod '$POD_NAME' (mlflow:${MLFLOW_PORT}->5000)..."
+# --add-host lets this pod's containers (e.g. an AI Gateway endpoint pointed at a
+# host-run Ollama) reach the host via host.containers.internal — same as fluxnova-up.sh.
 podman pod create --name "$POD_NAME" \
-  -p "${MLFLOW_PORT}:5000"
+  -p "${MLFLOW_PORT}:5000" \
+  --network "$DEV_NETWORK" \
+  --add-host host.containers.internal:host-gateway
 
 echo "Starting mlflow..."
 podman run -d --pod "$POD_NAME" --name mlflow \
@@ -85,15 +95,11 @@ echo "MLflow UI:     ${MLFLOW_URL}"
 echo "OTLP traces:   ${MLFLOW_URL}/v1/traces (point the OTel Collector's otlphttp exporter here)"
 echo "Backend store: ${BACKEND_STORE_DIR_RESOLVED}/mlflow.db"
 echo "Logs:          podman logs -f mlflow"
-echo "Stop/remove:   ./mlflow-pod-down.sh"
+echo "Stop/remove:   ./mlflow-down.sh"
 
 # Open the UI in the default browser — set MLFLOW_OPEN_BROWSER=false to skip.
 if [ "${MLFLOW_OPEN_BROWSER:-true}" = "true" ]; then
   if command -v explorer.exe >/dev/null 2>&1; then
     explorer.exe "$MLFLOW_URL" >/dev/null 2>&1 || true   # Windows / Git Bash
-  elif command -v open >/dev/null 2>&1; then
-    open "$MLFLOW_URL" || true                            # macOS
-  elif command -v xdg-open >/dev/null 2>&1; then
-    xdg-open "$MLFLOW_URL" >/dev/null 2>&1 || true         # Linux
   fi
 fi

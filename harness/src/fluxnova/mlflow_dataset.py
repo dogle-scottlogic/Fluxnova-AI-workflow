@@ -45,12 +45,14 @@ __all__ = [
 
 
 def experiment_name_for(config: WorkflowConfig) -> str:
-    return _experiment_name_for(config.process_key)
+    experiment_name = config.mlflow_dataset.experiment_name if config.mlflow_dataset else None
+    return _experiment_name_for(config.process_key, experiment_name)
 
 
 def dataset_name_for(config: WorkflowConfig) -> str:
     name_override = config.mlflow_dataset.name if config.mlflow_dataset else None
-    return _dataset_name_for(config.process_key, name_override)
+    experiment_name = config.mlflow_dataset.experiment_name if config.mlflow_dataset else None
+    return _dataset_name_for(config.process_key, name_override, experiment_name)
 
 
 def tracking_uri_for(config: WorkflowConfig, repo_root: Path) -> str:
@@ -91,6 +93,7 @@ def write_to_mlflow_dataset(
         process_key=config.process_key,
         dataset_name=config.mlflow_dataset.name if config.mlflow_dataset else None,
         record=record,
+        experiment_name=config.mlflow_dataset.experiment_name if config.mlflow_dataset else None,
     )
     return dataset_name, record_id
 

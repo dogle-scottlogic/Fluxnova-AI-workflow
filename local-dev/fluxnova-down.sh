@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stops and removes the fluxnova-local pod created by pod-up.sh.
+# Stops and removes the fluxnova-local pod created by fluxnova-up.sh.
 set -uo pipefail
 
 POD_NAME="${POD_NAME:-fluxnova-local}"

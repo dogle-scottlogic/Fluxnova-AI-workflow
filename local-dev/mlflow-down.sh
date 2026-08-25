@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stops and removes the mlflow-local pod created by mlflow-pod-up.sh.
+# Stops and removes the mlflow-local pod created by mlflow-up.sh.
 # The SQLite backend store (harness/.mlflow/mlflow.db by default) is not deleted.
 set -uo pipefail
 

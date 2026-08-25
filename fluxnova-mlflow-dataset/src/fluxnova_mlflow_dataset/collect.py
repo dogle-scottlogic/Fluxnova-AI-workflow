@@ -57,6 +57,7 @@ def collect_new_runs(
     expected_tool_rules: list[ExpectedToolRule],
     dataset_path: Path | None,
     dataset_name: str | None = None,
+    experiment_name: str | None = None,
     username: str | None = None,
     password: str | None = None,
     trace_reader: TraceReader | None = None,
@@ -74,7 +75,7 @@ def collect_new_runs(
     dependency injection in tests; real callers should leave them unset.
     """
     mlflow.set_tracking_uri(tracking_uri)
-    experiment = mlflow.set_experiment(experiment_name_for(process_key))
+    experiment = mlflow.set_experiment(experiment_name_for(process_key, experiment_name))
 
     traces = trace_reader or MlflowTraceReader(tracking_uri, experiment.experiment_id)
     client = fluxnova_client or FluxnovaClient(base_url=fluxnova_url, username=username, password=password)
@@ -100,6 +101,7 @@ def collect_new_runs(
             process_key=process_key,
             dataset_name=dataset_name,
             record=record,
+            experiment_name=experiment_name,
         )
         results.append(CollectedRun(instance_id, name, record_id, written))
     return results
