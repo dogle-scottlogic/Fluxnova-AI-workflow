@@ -45,7 +45,7 @@ from pathlib import Path
 from typing import Any
 
 import mlflow
-from fluxnova_mlflow_dataset import collect_new_runs
+from fluxnova_mlflow_dataset import collect_new_runs, decision_quality_judge
 from mlflow.entities import Feedback
 from mlflow.genai.scorers import Guidelines, scorer
 
@@ -180,20 +180,10 @@ def tool_argument_correctness(inputs: dict) -> Feedback:
 # EDD-AND-PRODUCTION-EVAL-ANALYSIS.md). Guidelines judges every trace's
 # `outputs` (no golden data needed) and is directly usable for automatic
 # (online) evaluation once pointed at a `gateway:/<endpoint>` model.
-_DECISION_QUALITY_GUIDELINES = [
-    "The final output must reach a definitive APPROVE or REJECT lending recommendation. "
-    "Vague conclusions or deferred decisions such as 'next steps required' do not satisfy "
-    "this guideline.",
-    "The final output must state its recommendation backed by evidence: it must cite "
-    "specific data points gathered during the assessment, such as credit score, fraud "
-    "risk, affordability result, or employment status.",
-]
-
-decision_quality = Guidelines(
-    name="decision_quality",
-    guidelines=_DECISION_QUALITY_GUIDELINES,
-    model=_NATIVE_JUDGE_MODEL,
-)
+# Guideline text/name live in `fluxnova_mlflow_dataset.scorers` so the
+# synchronous `eval-service-worker` (see EVAL-SERVICE-WORKER-PLAN.md) uses the
+# exact same judge definition rather than a second, potentially drifting copy.
+decision_quality = decision_quality_judge(_NATIVE_JUDGE_MODEL)
 
 # Automatic (online) evaluation -- Scorer.register()/.start() -- requires a
 # `gateway:/<endpoint-name>` model URI rather than calling Ollama directly
@@ -210,7 +200,7 @@ def automatic_judges(model: str = GATEWAY_JUDGE_MODEL) -> list[Guidelines]:
     extend this list as more judges get rewritten as MLflow-native.
     """
     return [
-        Guidelines(name="decision_quality", guidelines=_DECISION_QUALITY_GUIDELINES, model=model),
+        decision_quality_judge(model),
     ]
 
 

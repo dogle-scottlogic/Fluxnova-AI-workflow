@@ -166,6 +166,51 @@ class MlflowTraceReader:
             for span in chat_spans
         ]
 
+    def get_final_output(self, correlation_id: str) -> str | None:
+        """Return the agent's final output text for one run, reading trace data only.
+
+        Prefers the ``invoke_agent`` span's own ``gen_ai.output.messages`` attribute
+        (set by the ``agentic-subprocess`` plugin at subprocess end, when content
+        capture is enabled — see GENAI_SEMCONV_ALIGNMENT.md). Falls back to the last
+        ``chat`` child span's output message for traces recorded before that
+        attribute existed on ``invoke_agent``.
+
+        Deliberately reads nothing beyond MLflow's trace store (no BPMN file, no
+        Fluxnova REST API) — callers needing goal/input-variables/tool-call detail
+        too should use :func:`fluxnova_mlflow_dataset.report.build_agent_report`
+        instead.
+        """
+        spans = self._spans_for_correlation_id(correlation_id)
+        invoke_agent_span = self._find_span(spans, operation_name=_INVOKE_AGENT_OP)
+        if invoke_agent_span is not None:
+            output = invoke_agent_span.get_attribute("gen_ai.output.messages")
+            if output is not None:
+                return output
+        return _last_output_message(
+            sorted(
+                (s for s in spans if s.get_attribute(_OP_NAME_ATTR) == _CHAT_OP),
+                key=lambda s: s.start_time_ns or 0,
+            )
+        )
+
+    def get_trace_id(self, correlation_id: str) -> str:
+        """Return the MLflow trace id (``tr-...``) containing this run's spans.
+
+        Needed to attach assessments via ``mlflow.log_feedback(trace_id=...)``
+        after reading the run's data purely by ``gen_ai.conversation.id``.
+        """
+        for trace in self._search_traces():
+            if any(
+                span.get_attribute(_CONVERSATION_ID_ATTR) == correlation_id
+                for span in trace.data.spans
+            ):
+                return trace.info.trace_id
+        raise TraceStoreError(
+            f"No traces found for correlation id '{correlation_id}' in experiment "
+            f"{self._experiment_id}. Has the collector delivered this run's traces "
+            "to MLflow yet?"
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -221,3 +266,12 @@ def _duration_ms(span: Any) -> float | None:
     if start is None or end is None:
         return None
     return (end - start) / 1e6
+
+
+def _last_output_message(chat_spans_by_time: list[Any]) -> str | None:
+    """Return the most recent ``chat`` span's output message, if any."""
+    for span in reversed(chat_spans_by_time):
+        output = span.get_attribute("gen_ai.output.messages")
+        if output is not None:
+            return output
+    return None

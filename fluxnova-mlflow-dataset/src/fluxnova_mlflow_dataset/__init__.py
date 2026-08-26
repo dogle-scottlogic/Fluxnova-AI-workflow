@@ -16,6 +16,11 @@ from fluxnova_mlflow_dataset.collect import CollectedRun, collect_new_runs
 from fluxnova_mlflow_dataset.fluxnova_client import ApiError, FluxnovaClient
 from fluxnova_mlflow_dataset.goldens import load_goldens, match_golden
 from fluxnova_mlflow_dataset.report import build_agent_report
+from fluxnova_mlflow_dataset.scorers import (
+    DECISION_QUALITY_GUIDELINES,
+    DECISION_QUALITY_NAME,
+    decision_quality_judge,
+)
 from fluxnova_mlflow_dataset.store import (
     build_mlflow_record,
     dataset_name_for,
@@ -60,4 +65,7 @@ __all__ = [
     "build_agent_report",
     "collect_new_runs",
     "CollectedRun",
+    "DECISION_QUALITY_NAME",
+    "DECISION_QUALITY_GUIDELINES",
+    "decision_quality_judge",
 ]

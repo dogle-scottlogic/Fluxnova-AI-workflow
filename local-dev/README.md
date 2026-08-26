@@ -186,12 +186,42 @@ client.rename_experiment("<experiment_id>", "<new-name>")
 the `evaluation_datasets` table of the SQLite tracking store instead (safe for local dev data; the `dataset_id`,
 schema, and records are untouched, only the lookup name changes).
 
+## eval-service-worker: scoring completed subprocess runs
+
+`eval-service-worker` (see `eval-service-worker/` and `EVAL-SERVICE-WORKER-PLAN.md` at the repo root) is a standalone
+BPMN external-task worker that scores a just-completed agentic subprocess run against the `decision_quality` MLflow
+judge, reading data purely from MLflow's trace store (no BPMN parsing, no Fluxnova REST history calls). It logs both
+a trace assessment and an MLflow evaluation-dataset record, then completes its task with `evalPassed`/`evalRationale`
+output variables.
+
+**First-pass scope:** the BPMN itself hasn't been updated yet to route through this worker's topic
+(`agent-output-eval`) — there's no gateway/service-task wired up in `loan-assesment.bpmn` for it. Running the pod
+below just gets the worker polling and ready; it won't score anything until a BPMN change (a later pass) adds a
+service task on that topic after the loan-assessment ad-hoc subprocess. In the meantime you can trigger a scoring run
+manually — see `eval-service-worker/README.md` (or call `eval_service_worker.scoring.score_process_instance(...)`
+directly) with a real `processInstanceId` from a completed run.
+
+```bash
+cd local-dev
+./eval-service-up.sh      # builds the image, starts the eval-service-local pod
+./eval-service-down.sh    # stop and remove it
+```
+
+This builds `eval-service-worker/Dockerfile` from the repo root (so it can install the local
+`fluxnova-mlflow-dataset` path dependency too) and mounts `eval-service-config.yml` — a copy of
+`harness/config/loan-assesment.yml` with `fluxnova_url`/`mlflow_dataset.tracking_uri` pointed at the sibling
+`fluxnova-local`/`mlflow-local` pod names (rather than `localhost`, which only resolves for host-run tools) on the
+shared `fluxnova-dev` network. Both those pods must already be running.
+
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `fluxnova-up.sh` / `fluxnova-down.sh` | Start/stop the `fluxnova-local` pod (Fluxnova + OTel Collector) |
 | `mlflow-up.sh` / `mlflow-down.sh` | Start/stop the `mlflow-local` pod |
+| `eval-service-up.sh` / `eval-service-down.sh` | Build/start/stop the `eval-service-local` pod (see above) |
 | `default.yml` | Fluxnova config mounted by `fluxnova-up.sh` (OTel plugin → `localhost:4317`, shared pod network namespace) |
 | `otel-collector-config.yaml` | OTel Collector pipeline: `otlp` receiver → `otlp_http` exporter to MLflow |
+| `eval-service-config.yml` | Config mounted into the `eval-service-worker` container (pod-name-based URLs) |
 | `.env` | Environment values (image names/ports/paths) — adjust as needed |
+

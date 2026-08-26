@@ -57,6 +57,15 @@ variables:
   collateralDescription: ""
   loanPurpose: Home improvement
 
+# Settings for the standalone eval-service-worker (see eval-service-worker/ and
+# EVAL-SERVICE-WORKER-PLAN.md at the repo root). Not read by this harness itself —
+# shown here only so both services can share one config file per workflow.
+# All fields are optional; defaults shown below.
+# eval_service:
+#   topic: agent-output-eval           # external-task topic the worker subscribes to
+#   judge_model: gateway:/fluxnova-judge
+#   lock_duration_ms: 180000           # judge calls can take 90s+, keep generous
+
 # Mock external task workers: topic name -> output variables to complete the task with
 mock_workers:
   credit-score-check:
