@@ -17,9 +17,8 @@ RUN pip install --no-cache-dir \
     /app/fluxnova-mlflow-dataset \
     /app/eval-service-worker
 
-# Mount (or bake in) the workflow config at this path — see
-# local-dev/eval-service-up.sh for how it's supplied at runtime.
-ENV EVAL_SERVICE_CONFIG=/app/config/loan-assesment.yml
-
+# All settings have hardcoded defaults (see src/eval_service_worker/config.py) —
+# override any of them at `podman run` time with `-e EVAL_SERVICE_<NAME>=...` env
+# vars or by appending CLI flags after the image name. See local-dev/eval-service-up.sh
+# for the env vars this container actually needs (pod-name-based URLs).
 ENTRYPOINT ["eval-service-worker"]
-CMD ["/app/config/loan-assesment.yml"]

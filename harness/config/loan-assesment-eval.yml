@@ -8,10 +8,13 @@
 fluxnova_url: http://localhost:8080/engine-rest
 
 # Path from root to the BPMN file — relative to this config file or absolute
-bpmn_path: bpmn/loan-assesment.bpmn
+bpmn_path: bpmn/loan-assesment-eval.bpmn
 
 # Process definition key (the `id` attribute on <process> in the BPMN)
-process_key: loanAssessmentProcess
+# Distinct from loan-assesment.yml's `loanAssessmentProcess` — this BPMN has its
+# own <process id="loanAssessmentEvalProcess"> so the two definitions deploy as
+# separate process definitions in Fluxnova rather than two versions of one.
+process_key: loanAssessmentEvalProcess
 subprocess_id: AdHocSubProcess_LoanAssessmentAgent
 
 # Path to the golden dataset used for evaluation (relative to the repo root).
@@ -44,7 +47,7 @@ expected_tools:
     tool: Value Collateral
 
 # Human-readable deployment name shown in Cockpit
-deployment_name: Loan Assessment
+deployment_name: Loan Assessment (Eval)
 
 # Initial process variables (plain key: value pairs)
 variables:

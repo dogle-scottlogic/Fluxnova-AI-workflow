@@ -11,7 +11,6 @@ dependencies = [
     "mlflow[genai]>=3.15",
     "fluxnova-mlflow-dataset",
     "camunda-external-task-client-python3>=2.3",
-    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

@@ -190,16 +190,22 @@ schema, and records are untouched, only the lookup name changes).
 
 `eval-service-worker` (see `eval-service-worker/` and `EVAL-SERVICE-WORKER-PLAN.md` at the repo root) is a standalone
 BPMN external-task worker that scores a just-completed agentic subprocess run against the `decision_quality` MLflow
-judge, reading data purely from MLflow's trace store (no BPMN parsing, no Fluxnova REST history calls). It logs both
-a trace assessment and an MLflow evaluation-dataset record, then completes its task with `evalPassed`/`evalRationale`
-output variables.
+judge plus a set of trace-only deterministic scorers (`required_tools_called`, `no_tool_errors`,
+`definitive_decision_stated`), reading data purely from MLflow's trace store (no BPMN parsing, no Fluxnova REST
+history calls). All scorers' `Feedback` are logged back onto the trace as MLflow assessments grouped under one
+Evaluation Run, plus a lightweight MLflow evaluation-dataset record; the task then completes with
+`evalPassed`/`evalRationale` output variables — `evalPassed` is driven solely by `decision_quality` (the deterministic
+scorers are recorded for visibility/audit only, not yet wired into the gate).
 
-**First-pass scope:** the BPMN itself hasn't been updated yet to route through this worker's topic
-(`agent-output-eval`) — there's no gateway/service-task wired up in `loan-assesment.bpmn` for it. Running the pod
-below just gets the worker polling and ready; it won't score anything until a BPMN change (a later pass) adds a
-service task on that topic after the loan-assessment ad-hoc subprocess. In the meantime you can trigger a scoring run
-manually — see `eval-service-worker/README.md` (or call `eval_service_worker.scoring.score_process_instance(...)`
-directly) with a real `processInstanceId` from a completed run.
+**BPMN wiring:** `bpmn/loan-assesment-eval.bpmn` (a separate process definition, `loanAssessmentEvalProcess`, from the
+original `loan-assesment.bpmn`) has a `ServiceTask_EvaluateAgentOutput` on this worker's topic (`agent-output-eval`)
+right after the loan-assessment ad-hoc subprocess, followed by `ExclusiveGateway_EvalPassed` routing to
+`EndEvent_EvalPassed`/`EndEvent_EvalFailed` based on `evalPassed` — confirmed working end-to-end against a live
+process instance. Use `harness/config/loan-assesment-eval.yml` (not `loan-assesment.yml`) to run this BPMN, and set
+`MLFLOW_EXPERIMENT_ID` in `.env` to that config's experiment (`fluxnova-loanAssessmentEvalProcess`) so traces route to
+where the worker looks for them. You can also trigger a one-off scoring run manually — see
+`eval-service-worker/README.md` (or call `eval_service_worker.scoring.score_process_instance(...)` directly) with a
+real `processInstanceId` from a completed run.
 
 ```bash
 cd local-dev
@@ -208,10 +214,16 @@ cd local-dev
 ```
 
 This builds `eval-service-worker/Dockerfile` from the repo root (so it can install the local
-`fluxnova-mlflow-dataset` path dependency too) and mounts `eval-service-config.yml` — a copy of
-`harness/config/loan-assesment.yml` with `fluxnova_url`/`mlflow_dataset.tracking_uri` pointed at the sibling
-`fluxnova-local`/`mlflow-local` pod names (rather than `localhost`, which only resolves for host-run tools) on the
-shared `fluxnova-dev` network. Both those pods must already be running.
+`fluxnova-mlflow-dataset` path dependency too) and passes `EVAL_SERVICE_FLUXNOVA_URL`/`EVAL_SERVICE_TRACKING_URI`
+env vars pointed at the sibling `fluxnova-local`/`mlflow-local` pod names (rather than `localhost`, which only
+resolves for host-run tools) on the shared `fluxnova-dev` network. Both those pods must already be running.
+
+The worker has **no config file of its own** — every setting (`fluxnova_url`, `experiment_name`, `process_key`,
+`topic`, `judge_model`, `lock_duration_ms`, `tracking_uri`) is a hardcoded default in
+`eval-service-worker/src/eval_service_worker/config.py`, overridable via either a CLI flag (e.g. `--tracking-uri`)
+or an `EVAL_SERVICE_<NAME>` environment variable (e.g. `EVAL_SERVICE_TRACKING_URI`) — see that file or
+`eval-service-worker/README.md` for the full list. This is deliberate: it keeps the worker independently deployable
+without depending on `harness`'s workflow YAML.
 
 ## Files
 
@@ -222,6 +234,5 @@ shared `fluxnova-dev` network. Both those pods must already be running.
 | `eval-service-up.sh` / `eval-service-down.sh` | Build/start/stop the `eval-service-local` pod (see above) |
 | `default.yml` | Fluxnova config mounted by `fluxnova-up.sh` (OTel plugin → `localhost:4317`, shared pod network namespace) |
 | `otel-collector-config.yaml` | OTel Collector pipeline: `otlp` receiver → `otlp_http` exporter to MLflow |
-| `eval-service-config.yml` | Config mounted into the `eval-service-worker` container (pod-name-based URLs) |
 | `.env` | Environment values (image names/ports/paths) — adjust as needed |
 

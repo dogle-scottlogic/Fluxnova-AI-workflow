@@ -1,14 +1,14 @@
 # Fluxnova AI Workflow
 
-A test harness and evaluation framework for Fluxnova workflows that include AI-driven agentic subprocesses.
+A set of tooling, test harness and evaluation framework for Fluxnova workflows that include AI-driven agentic subprocesses.
 
 Goals of this project are:
 
 - Create an Eval Test framework which facilitates Evaluation Driven Design (EDD). This will allow a demo of how you can
   build out an agentic workflow using EDD.
-- Add an OTel collector and gen_ai metrics and tracing with a suitable dashboard. This will allow a demo of real time
-  production monitoring
-- Add Eval to production level process runs which will facilitate checks on responses and break-glass to a human in
+- Add an OTel collector and gen_ai* metrics and tracing with a suitable dashboard. This will allow a demo of real time
+  production monitoring.
+- Add an Eval task to production level process runs which will facilitate checks on responses and break-glass to a human in
   Production environments.
 
 ## Overview
@@ -16,8 +16,7 @@ Goals of this project are:
 This project is split into three independent Python packages:
 
 1. **`fluxnova-runner`** (`fluxnova-runner/`) — deploys a BPMN workflow to Fluxnova, starts a process instance with
-   configurable input variables, drives mock external-task workers, and polls until the process completes. It does
-   **not** produce any evaluation report itself.
+   configurable input variables, drives mock external-task workers, and polls until the sub-process completes.
 2. **`fluxnova-mlflow-dataset`** (`fluxnova-mlflow-dataset/`) — a small shared library (no CLI) used by the harness's
    `mlflow-eval` suite. It provides:
     - **collection** (`collect_new_runs`) — an on-demand pre-step (run via `mlflow-eval --collect`, not a background
@@ -32,7 +31,7 @@ This project is split into three independent Python packages:
       `mlflow.genai.evaluate` scorers, with results browsable in the MLflow UI. It can evaluate a single ad-hoc report
       file, a single previously recorded run (by process instance ID, read from the MLflow dataset), or every recorded
       run at once — optionally collecting newly-completed runs first (`--collect`).
-    - **DeepEval evaluation suite** (`deep-eval`) — *deprecated*. Loads an agent-history JSON report and evaluates the
+    - **DeepEval evaluation suite** (`deep-eval`) — *DEPRECATED - DO NOT USE*. Loads an agent-history JSON report and evaluates the
       LLM agent's behaviour using configurable metrics: tool correctness, argument correctness, decision quality,
       evidence citation, and deterministic safety checks. Both evaluation suites can be run independently; neither
       depends on the other, and neither depends on the runner being active at evaluation time (only on the report file /
@@ -83,43 +82,52 @@ This project is split into three independent Python packages:
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Prerequisites
+## First time setup
 
-- Python 3.11+
-- A running [Fluxnova](https://fluxnova.io) engine (default: `http://localhost:8080/engine-rest`)
-- A running **MLflow tracking server** (not just the `mlflow` CLI) on `http://localhost:5000`, backed by the same SQLite
-  store the harness uses — see "Running the MLflow tracking server" below. It must be running *before* you run the
-  workflow, since the OTel Collector posts traces to it in real time.
-- An OTel Collector configured with an `otlphttp` exporter pointing at MLflow's `/v1/traces` endpoint — required for
-  `mlflow-eval --collect` to find completed runs
-- [Ollama](https://ollama.com) with `llama3.2` pulled — used as the judge model for both the DeepEval and MLflow
-  evaluation suites
+This project assumes you're on **Windows**, using **[Podman](https://podman.io)** for all backing services (Fluxnova
+engine, OTel Collector, MLflow), and **Git Bash** as your terminal — every command in this README uses forward-slash
+(`/`) paths for that reason. (Backslashes work fine in native PowerShell/`cmd.exe`, but in Git Bash/MINGW64 they're
+treated as escape characters and silently mangle paths, e.g. `config\loan-assesment.yml` → `configloan-assesment.yml`
+— so forward slashes are used consistently here, since they work in both shells.)
 
-## Installation
+1. **Install prerequisites:**
+   - [Podman](https://podman.io/docs/installation), then start its VM: `podman machine init && podman machine start`
+   - Python 3.11+
+   - [Ollama](https://ollama.com) with `llama3.2` pulled (`ollama pull llama3.2`) — the judge model used by both
+     evaluation suites
+   - A locally built/loaded **Fluxnova** container image (not published anywhere) — build it from the eval fork, or
+     `podman load -i <fluxnova image tarball>`
 
-All three packages share a single virtual environment (created under `harness/.venv`) and are installed editable, so
-changes to any package take effect immediately without reinstalling:
+2. **Create the shared virtual environment** — all three packages install editable into one venv under
+   `harness/.venv`, so changes to any package take effect immediately without reinstalling:
+   ```bash
+   cd harness
+   python -m venv .venv
+   source .venv/Scripts/activate
 
-```bash
-cd harness
-python -m venv .venv
-source .venv/Scripts/activate   # Git Bash on Windows; use .venv\Scripts\Activate.ps1 in PowerShell
+   pip install -e ".[dev]"
+   pip install -e ../fluxnova-mlflow-dataset[dev]
+   pip install -e ../fluxnova-runner[dev]
+   ```
+   This installs four console-script entry points: `fluxnova-run` / `fluxnova-run-mock-workers` (runner), and
+   `deep-eval` / `mlflow-eval` (harness evaluation suites).
 
-pip install -e ".[dev]"
-pip install -e ../fluxnova-mlflow-dataset[dev]
-pip install -e ../fluxnova-runner[dev]
-```
+3. **Start the backing services as Podman pods**, from Git Bash at the repo root:
+   ```bash
+   cd local-dev
+   # adjust .env: set FLUXNOVA_IMAGE to your locally built/loaded image
 
-This installs three console-script entry points into `harness/.venv`: `fluxnova-run` / `fluxnova-run-mock-workers`
-(runner), and `deep-eval` / `mlflow-eval` (harness evaluation suites).
+   ./mlflow-up.sh     # MLflow tracking server + UI — start this first
+   ./fluxnova-up.sh   # Fluxnova engine + OTel Collector (posts traces to MLflow)
+   ```
+   Both scripts open their web UI in your default browser once ready. See
+   [`local-dev/README.md`](local-dev/README.md) for the full pod details, the optional `eval-service-worker` pod, and
+   Windows/WSL2 troubleshooting.
 
-## A note on shells (Windows)
+4. **(One-off) Register the MLflow AI Gateway judge endpoint** — required for automatic evaluation judges. See
+   `local-dev/README.md`'s "MLflow AI Gateway endpoint for automatic evaluation judges" section.
 
-All commands below use forward slashes (`/`) for paths, which work correctly in both **Git Bash / WSL** and
-**PowerShell**. If you use backslashes (`\`) in **Git Bash / MINGW64**, they are treated as escape characters and will
-silently mangle the path (e.g. `config\loan-assesment.yml` becomes `configloan-assesment.yml`). Backslashes are safe to
-use in native **PowerShell** or `cmd.exe`, but forward slashes work everywhere, so they're used consistently in this
-README.
+You're now ready to run a workflow — see "Running `fluxnova-runner`" below.
 
 ## Running `fluxnova-runner` (Windows Git Bash)
 
@@ -228,12 +236,14 @@ MLflow's `/v1/traces` endpoint and restart the Collector. `--collect` requires `
 config; the `mlflow_dataset.name`/`tracking_uri` config block (if present) is still honoured for where records get
 written.
 
-## Running the MLflow tracking server
+## Alternative: running the MLflow tracking server on the host
 
-`mlflow-eval` can *read* the SQLite store directly (`sqlite:///harness/.mlflow/mlflow.db`), but for the OTel Collector
-to *write* traces into it, an actual MLflow tracking **server** (an HTTP process, not just the library) must be running
-and listening on the URL the Collector's `otlphttp` exporter targets (`http://localhost:5000/v1/traces` by default).
-`mlflow ui` alone does **not** accept incoming trace writes — it only reads.
+First-time setup above uses `local-dev/mlflow-up.sh` (a Podman pod) to run the MLflow tracking server. If you'd
+rather run it as a host process instead (e.g. for IDE debugging), `mlflow-eval` can *read* the SQLite store directly
+(`sqlite:///harness/.mlflow/mlflow.db`), but for the OTel Collector to *write* traces into it, an actual MLflow
+tracking **server** (an HTTP process, not just the library) must be running and listening on the URL the Collector's
+`otlphttp` exporter targets (`http://localhost:5000/v1/traces` by default). `mlflow ui` alone does **not** accept
+incoming trace writes — it only reads.
 
 Start it (from the repo root, with `harness/.venv` activated) and leave it running in its own terminal for as long as
 you want traces to be captured:
@@ -264,9 +274,9 @@ you no longer need a separate `mlflow ui` process pointed at the same store.
 
 ## Local development with Podman (Fluxnova + OTel Collector + MLflow)
 
-See [`local-dev/README.md`](local-dev/README.md) for running the Fluxnova engine, the OTel Collector, and (optionally)
-the MLflow tracking server as containers for local development with Podman (or Docker) — including prerequisites, a
-Compose-based option and a Podman-pod alternative, an optional MLflow pod, and troubleshooting notes.
+See [`local-dev/README.md`](local-dev/README.md) for the full details on running the Fluxnova engine, the OTel
+Collector, MLflow, and the `eval-service-worker` as Podman pods for local development — including troubleshooting
+notes and the MLflow AI Gateway judge-endpoint setup.
 
 ## Config file
 

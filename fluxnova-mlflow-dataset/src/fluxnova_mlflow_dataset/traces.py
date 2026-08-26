@@ -12,6 +12,7 @@ reads (``gen_ai.*`` semantic-convention attributes on ``invoke_agent``,
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -117,7 +118,7 @@ class MlflowTraceReader:
                              on the run's ``invoke_agent`` span.
         """
         spans = self._spans_for_correlation_id(correlation_id)
-        span = self._find_span(spans, operation_name=_INVOKE_AGENT_OP)
+        span = _find_span(spans, operation_name=_INVOKE_AGENT_OP)
         if span is None:
             raise TraceStoreError(
                 f"No invoke_agent span found for correlation id '{correlation_id}'"
@@ -136,18 +137,7 @@ class MlflowTraceReader:
     def get_tool_call_spans(self, correlation_id: str) -> list[ToolCallSpan]:
         """Return one ``ToolCallSpan`` per ``execute_tool`` child span for the run."""
         spans = self._spans_for_correlation_id(correlation_id)
-        return [
-            ToolCallSpan(
-                tool_name=span.get_attribute("gen_ai.tool.name"),
-                tool_call_id=span.get_attribute("gen_ai.tool.call.id"),
-                agent_name=span.get_attribute("gen_ai.agent.name"),
-                status=_status_str(span),
-                error_type=span.get_attribute("error.type"),
-                duration_ms=_duration_ms(span),
-            )
-            for span in spans
-            if span.get_attribute(_OP_NAME_ATTR) == _EXECUTE_TOOL_OP
-        ]
+        return tool_calls_from_spans(spans)
 
     def get_llm_messages(self, correlation_id: str) -> list[ChatMessages]:
         """Return each ``chat`` span's input/output messages, ordered by call time."""
@@ -169,28 +159,43 @@ class MlflowTraceReader:
     def get_final_output(self, correlation_id: str) -> str | None:
         """Return the agent's final output text for one run, reading trace data only.
 
-        Prefers the ``invoke_agent`` span's own ``gen_ai.output.messages`` attribute
-        (set by the ``agentic-subprocess`` plugin at subprocess end, when content
-        capture is enabled — see GENAI_SEMCONV_ALIGNMENT.md). Falls back to the last
-        ``chat`` child span's output message for traces recorded before that
-        attribute existed on ``invoke_agent``.
-
         Deliberately reads nothing beyond MLflow's trace store (no BPMN file, no
         Fluxnova REST API) — callers needing goal/input-variables/tool-call detail
         too should use :func:`fluxnova_mlflow_dataset.report.build_agent_report`
         instead.
         """
         spans = self._spans_for_correlation_id(correlation_id)
-        invoke_agent_span = self._find_span(spans, operation_name=_INVOKE_AGENT_OP)
-        if invoke_agent_span is not None:
-            output = invoke_agent_span.get_attribute("gen_ai.output.messages")
-            if output is not None:
-                return output
-        return _last_output_message(
-            sorted(
-                (s for s in spans if s.get_attribute(_OP_NAME_ATTR) == _CHAT_OP),
-                key=lambda s: s.start_time_ns or 0,
-            )
+        return final_output_from_spans(spans)
+
+    def get_input_variables(self, correlation_id: str) -> dict[str, Any]:
+        """Return the applicant/process input variables the agent itself received.
+
+        Read off the ``invoke_agent`` span's ``mlflow.spanInputs`` attribute (the
+        same ``agent:context`` variables wired up in the BPMN's ad-hoc subprocess,
+        e.g. ``applicantType``/``hasCollateral``/``requestedAmount``) — this is
+        trace data, not a BPMN/Fluxnova REST read, so profile-conditional
+        deterministic scorers (see ``scorers.py``) can stay trace-only too.
+        """
+        spans = self._spans_for_correlation_id(correlation_id)
+        return input_variables_from_spans(spans)
+
+    def get_trace(self, correlation_id: str) -> Any:
+        """Return the MLflow ``Trace`` object containing this run's spans.
+
+        Useful for callers that pass a trace straight into
+        ``mlflow.genai.evaluate(data=[{"trace": trace}], ...)`` so assessments
+        and the resulting Evaluation Run are logged against the *same* trace.
+        """
+        for trace in self._search_traces():
+            if any(
+                span.get_attribute(_CONVERSATION_ID_ATTR) == correlation_id
+                for span in trace.data.spans
+            ):
+                return trace
+        raise TraceStoreError(
+            f"No traces found for correlation id '{correlation_id}' in experiment "
+            f"{self._experiment_id}. Has the collector delivered this run's traces "
+            "to MLflow yet?"
         )
 
     def get_trace_id(self, correlation_id: str) -> str:
@@ -199,17 +204,7 @@ class MlflowTraceReader:
         Needed to attach assessments via ``mlflow.log_feedback(trace_id=...)``
         after reading the run's data purely by ``gen_ai.conversation.id``.
         """
-        for trace in self._search_traces():
-            if any(
-                span.get_attribute(_CONVERSATION_ID_ATTR) == correlation_id
-                for span in trace.data.spans
-            ):
-                return trace.info.trace_id
-        raise TraceStoreError(
-            f"No traces found for correlation id '{correlation_id}' in experiment "
-            f"{self._experiment_id}. Has the collector delivered this run's traces "
-            "to MLflow yet?"
-        )
+        return self.get_trace(correlation_id).info.trace_id
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -246,13 +241,6 @@ class MlflowTraceReader:
             )
         return self._traces_cache
 
-    @staticmethod
-    def _find_span(spans: list[Any], operation_name: str) -> Any | None:
-        for span in spans:
-            if span.get_attribute(_OP_NAME_ATTR) == operation_name:
-                return span
-        return None
-
 
 def _status_str(span: Any) -> str:
     status_code = getattr(span, "status_code", None)
@@ -275,3 +263,74 @@ def _last_output_message(chat_spans_by_time: list[Any]) -> str | None:
         if output is not None:
             return output
     return None
+
+
+def _find_span(spans: list[Any], operation_name: str) -> Any | None:
+    for span in spans:
+        if span.get_attribute(_OP_NAME_ATTR) == operation_name:
+            return span
+    return None
+
+
+def final_output_from_spans(spans: list[Any]) -> str | None:
+    """Return the agent's final output text given a run's spans.
+
+    Prefers the ``invoke_agent`` span's own ``gen_ai.output.messages`` attribute
+    (set by the ``agentic-subprocess`` plugin at subprocess end, when content
+    capture is enabled — see GENAI_SEMCONV_ALIGNMENT.md). Falls back to the last
+    ``chat`` child span's output message for traces recorded before that
+    attribute existed on ``invoke_agent``.
+
+    A free function (not a ``MlflowTraceReader`` method) so it can be reused both
+    by the reader itself and by trace-based custom scorers in ``scorers.py``,
+    which only ever have a raw ``trace.data.spans`` list to work with.
+    """
+    invoke_agent_span = _find_span(spans, operation_name=_INVOKE_AGENT_OP)
+    if invoke_agent_span is not None:
+        output = invoke_agent_span.get_attribute("gen_ai.output.messages")
+        if output is not None:
+            return output
+    return _last_output_message(
+        sorted(
+            (s for s in spans if s.get_attribute(_OP_NAME_ATTR) == _CHAT_OP),
+            key=lambda s: s.start_time_ns or 0,
+        )
+    )
+
+
+def input_variables_from_spans(spans: list[Any]) -> dict[str, Any]:
+    """Return the applicant/process input variables given a run's spans.
+
+    Read off the ``invoke_agent`` span's ``mlflow.spanInputs`` attribute — the
+    same ``agent:context`` variables (``applicantType``, ``hasCollateral``,
+    ``requestedAmount``, etc.) wired up in the BPMN's ad-hoc subprocess. A free
+    function for the same reuse reason as :func:`final_output_from_spans`.
+    """
+    invoke_agent_span = _find_span(spans, operation_name=_INVOKE_AGENT_OP)
+    if invoke_agent_span is None:
+        return {}
+    raw = invoke_agent_span.get_attribute("mlflow.spanInputs")
+    if raw is None:
+        return {}
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return dict(raw)
+
+
+def tool_calls_from_spans(spans: list[Any]) -> list[ToolCallSpan]:
+    """Return one ``ToolCallSpan`` per ``execute_tool`` span, given a run's spans."""
+    return [
+        ToolCallSpan(
+            tool_name=span.get_attribute("gen_ai.tool.name"),
+            tool_call_id=span.get_attribute("gen_ai.tool.call.id"),
+            agent_name=span.get_attribute("gen_ai.agent.name"),
+            status=_status_str(span),
+            error_type=span.get_attribute("error.type"),
+            duration_ms=_duration_ms(span),
+        )
+        for span in spans
+        if span.get_attribute(_OP_NAME_ATTR) == _EXECUTE_TOOL_OP
+    ]

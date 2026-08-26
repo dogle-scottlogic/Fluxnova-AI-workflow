@@ -174,6 +174,57 @@ class Client:
 
         raise TimeoutError(f"Process instance {instance_id} did not complete within {timeout}s")
 
+    def wait_for_activity_completion(
+            self,
+            instance_id: str,
+            activity_id: str,
+            poll_interval: float = 2.0,
+            timeout: float = 300.0,
+    ) -> dict[str, Any]:
+        """Block until one activity (e.g. an ad-hoc subprocess) within the process
+        instance finishes, then return its historic activity-instance record.
+
+        Unlike :meth:`wait_for_completion`, this returns as soon as the named
+        activity itself ends — regardless of whether the overall process
+        instance is still running (e.g. still has a downstream eval service
+        task/gateway left to execute).
+
+        Args:
+            instance_id: The process instance ID to monitor.
+            activity_id: The BPMN element ID to wait on (the ``id`` attribute
+                         on the element in the BPMN, e.g.
+                         ``AdHocSubProcess_LoanAssessmentAgent``).
+            poll_interval: Seconds between status checks.
+            timeout: Maximum seconds to wait before raising ``TimeoutError``.
+
+        Returns:
+            The historic activity-instance dict for the finished activity
+            (includes ``activityInstanceId``, ``startTime``, ``endTime``, etc.).
+
+        Raises:
+            TimeoutError: If the activity has not finished within *timeout* seconds.
+        """
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            response = self._session.get(
+                f"{self._base}/history/activity-instance",
+                params={
+                    "processInstanceId": instance_id,
+                    "activityId": activity_id,
+                    "finished": "true",
+                },
+            )
+            self._raise_for_status(response, "get historic activity instance")
+            instances = response.json()
+            if instances:
+                return instances[0]
+            time.sleep(poll_interval)
+
+        raise TimeoutError(
+            f"Activity '{activity_id}' on process instance {instance_id} did not "
+            f"finish within {timeout}s"
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

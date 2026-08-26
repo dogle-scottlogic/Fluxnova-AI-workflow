@@ -19,7 +19,11 @@ from fluxnova_mlflow_dataset.report import build_agent_report
 from fluxnova_mlflow_dataset.scorers import (
     DECISION_QUALITY_GUIDELINES,
     DECISION_QUALITY_NAME,
+    DETERMINISTIC_SCORERS,
     decision_quality_judge,
+    definitive_decision_stated,
+    no_tool_errors,
+    required_tools_called,
 )
 from fluxnova_mlflow_dataset.store import (
     build_mlflow_record,
@@ -68,4 +72,8 @@ __all__ = [
     "DECISION_QUALITY_NAME",
     "DECISION_QUALITY_GUIDELINES",
     "decision_quality_judge",
+    "DETERMINISTIC_SCORERS",
+    "required_tools_called",
+    "no_tool_errors",
+    "definitive_decision_stated",
 ]

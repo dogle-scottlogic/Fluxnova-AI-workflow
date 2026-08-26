@@ -39,6 +39,16 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Start mock external task workers alongside the process",
     )
+    parser.add_argument(
+        "--wait-for-activity",
+        metavar="ACTIVITY_ID",
+        help=(
+            "Instead of waiting for the whole process to finish, return as soon as "
+            "this BPMN activity (e.g. AdHocSubProcess_LoanAssessmentAgent) completes "
+            "— useful when a downstream step (like an eval service task) shouldn't "
+            "block this run from being considered done."
+        ),
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -79,9 +89,14 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     instance_id = initiate(config=cfg, client=client)
 
-    print("Waiting for process to complete …")
-    client.wait_for_completion(instance_id)
-    print(f"Process {instance_id} completed.")
+    if args.wait_for_activity:
+        print(f"Waiting for activity '{args.wait_for_activity}' to complete …")
+        client.wait_for_activity_completion(instance_id, args.wait_for_activity)
+        print(f"Activity '{args.wait_for_activity}' on {instance_id} completed.")
+    else:
+        print("Waiting for process to complete …")
+        client.wait_for_completion(instance_id)
+        print(f"Process {instance_id} completed.")
     print(
         "Run 'mlflow-eval <config> --collect' to record the completed subprocess run "
         "into the MLflow evaluation dataset."

@@ -2,11 +2,13 @@
 
 Subscribes to a single Camunda/Fluxnova external-task topic (default
 ``agent-output-eval``). On each task, reads the process instance's final
-output from MLflow's trace store, runs the ``decision_quality`` judge, logs
-the result to MLflow (trace assessment + dataset record), and completes the
-task with ``evalPassed``/``evalScore``/``evalRationale`` output variables for
-later BPMN routing (no gateway wired up yet — see EVAL-SERVICE-WORKER-PLAN.md
-Phase B, deferred).
+output/trace from MLflow, runs the ``decision_quality`` judge plus a set of
+deterministic scorers (see ``scoring.py``), logs the results to MLflow (trace
+assessments + an Evaluation Run + a dataset record), and completes the task
+with ``evalPassed``/``evalRationale`` output variables that drive the BPMN
+gateway (``loan-assesment-eval.bpmn``'s ``ExclusiveGateway_EvalPassed``) —
+gating is driven solely by ``decision_quality``; the deterministic scorers are
+recorded for visibility only, not (yet) wired into the gateway condition.
 """
 
 from __future__ import annotations

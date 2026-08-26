@@ -1,67 +1,71 @@
 """Configuration for the ``eval-service-worker`` standalone service.
 
-Reads the same workflow YAML config file used by ``fluxnova-runner``/``harness``
-(e.g. ``harness/config/loan-assesment.yml``) rather than inventing a new file —
-extra keys those tools use (``bpmn_path``, ``available_tools``, etc.) are simply
-ignored here. Two new, optional sections are read:
+Deliberately **not** read from ``harness``'s workflow YAML config
+(``harness/config/loan-assesment.yml``) — this worker is meant to be a slim,
+independently deployable service (its own Podman pod/container), and depending
+on another service's config file for its own connection settings would
+recreate exactly the coupling that was avoided everywhere else (no BPMN
+parsing, no Fluxnova REST calls — see ``EVAL-SERVICE-WORKER-PLAN.md``).
 
-    eval_service:
-      topic: agent-output-eval       # external-task topic to subscribe to
-      judge_model: gateway:/fluxnova-judge   # MLflow judge model URI
-      lock_duration_ms: 180000       # generous — judge calls can take 90s+
-
-    mlflow_dataset:
-      tracking_uri: http://localhost:5000    # must be the MLflow *server's*
-                                              # HTTP(S) address for gateway-routed
-                                              # judge models to work (see
-                                              # EDD-AND-PRODUCTION-EVAL-ANALYSIS.md)
-      experiment_name: fluxnova-loanAssessmentProcess
-
-(the ``mlflow_dataset`` section is the same one ``fluxnova.config.WorkflowConfig``
-already reads — this loader mirrors just the two fields it needs.)
+Instead, all settings are simple hardcoded defaults below, overridable via CLI
+flags or environment variables (see ``main.py``) — there's only ever one
+workflow being scored in this demo, so a config file of its own would just be
+one more thing to keep in sync for no real benefit.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
-import yaml
+# Fluxnova/Camunda engine REST base URL this worker polls for external tasks.
+DEFAULT_FLUXNOVA_URL = "http://localhost:8080/engine-rest"
 
-_DEFAULT_TOPIC = "agent-output-eval"
-_DEFAULT_JUDGE_MODEL = "gateway:/fluxnova-judge"
+# The MLflow experiment that scored runs are read from and written back to.
+# Matches `fluxnova-<process_key>` for loan-assesment-eval.yml's process_key
+# (loanAssessmentEvalProcess) — see fluxnova_mlflow_dataset.store.experiment_name_for.
+DEFAULT_EXPERIMENT_NAME = "fluxnova-loanAssessmentEvalProcess"
+
+# Used only to tag dataset records / satisfy the shared write_to_mlflow_dataset()
+# helper's (process_key-shaped) signature — naming is always driven by
+# DEFAULT_EXPERIMENT_NAME above, not derived from this. Matches the <process id>
+# in bpmn/loan-assesment-eval.bpmn (kept distinct from loan-assesment.bpmn's
+# "loanAssessmentProcess" so the two BPMNs deploy as separate definitions).
+DEFAULT_PROCESS_KEY = "loanAssessmentEvalProcess"
+
+# External-task topic this worker subscribes to.
+DEFAULT_TOPIC = "agent-output-eval"
+
+# MLflow judge model URI — gateway-routed, matching the automatic decision_quality
+# judge registered via the mlflow-judges CLI (see local-dev/README.md).
+DEFAULT_JUDGE_MODEL = "gateway:/fluxnova-judge"
+
 # Judge calls routed through the gateway to a local Ollama model have been
 # observed taking 90+ seconds in this environment (see
 # EDD-AND-PRODUCTION-EVAL-ANALYSIS.md / EVAL-SERVICE-WORKER-PLAN.md) — the lock
 # duration must comfortably exceed that so Fluxnova doesn't reassign the task
 # to another worker mid-scoring.
-_DEFAULT_LOCK_DURATION_MS = 180_000
-_DEFAULT_TRACKING_URI = "http://localhost:5000"
+DEFAULT_LOCK_DURATION_MS = 180_000
+
+# MLflow tracking server address — must be an HTTP(S) URL (not a direct
+# sqlite:/// path), since gateway-routed judge models are resolved by the
+# server process itself.
+DEFAULT_TRACKING_URI = "http://localhost:5000"
 
 
 @dataclass
 class EvalServiceConfig:
-    """All settings needed to run the eval-service-worker against one workflow."""
+    """All settings needed to run the eval-service-worker against one workflow.
 
-    fluxnova_url: str
-    process_key: str
-    topic: str = _DEFAULT_TOPIC
-    judge_model: str = _DEFAULT_JUDGE_MODEL
-    lock_duration_ms: int = _DEFAULT_LOCK_DURATION_MS
-    tracking_uri: str = _DEFAULT_TRACKING_URI
-    experiment_name: str | None = None
+    Construct directly (all fields have sensible defaults) and override only
+    what differs for your environment — see ``main.py`` for the CLI
+    flags/environment variables that do this for the ``eval-service-worker``
+    entry point.
+    """
 
-    @classmethod
-    def from_file(cls, path: Path) -> EvalServiceConfig:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-        eval_service = raw.get("eval_service") or {}
-        mlflow_dataset = raw.get("mlflow_dataset") or {}
-        return cls(
-            fluxnova_url=raw["fluxnova_url"].rstrip("/"),
-            process_key=raw["process_key"],
-            topic=eval_service.get("topic", _DEFAULT_TOPIC),
-            judge_model=eval_service.get("judge_model", _DEFAULT_JUDGE_MODEL),
-            lock_duration_ms=eval_service.get("lock_duration_ms", _DEFAULT_LOCK_DURATION_MS),
-            tracking_uri=mlflow_dataset.get("tracking_uri", _DEFAULT_TRACKING_URI),
-            experiment_name=mlflow_dataset.get("experiment_name"),
-        )
+    fluxnova_url: str = DEFAULT_FLUXNOVA_URL
+    experiment_name: str = DEFAULT_EXPERIMENT_NAME
+    process_key: str = DEFAULT_PROCESS_KEY
+    topic: str = DEFAULT_TOPIC
+    judge_model: str = DEFAULT_JUDGE_MODEL
+    lock_duration_ms: int = DEFAULT_LOCK_DURATION_MS
+    tracking_uri: str = DEFAULT_TRACKING_URI

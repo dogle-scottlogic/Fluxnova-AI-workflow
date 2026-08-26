@@ -222,6 +222,43 @@ class TestClientWaitForCompletion:
             client.wait_for_completion("abc-123", poll_interval=0, timeout=0.01)
 
 
+class TestClientWaitForActivityCompletion:
+    def _client(self) -> Client:
+        return Client(base_url="http://localhost:8080/engine-rest")
+
+    def test_returns_activity_instance_once_finished(self):
+        client = self._client()
+        mock_empty = MagicMock(ok=True)
+        mock_empty.json.return_value = []
+        mock_finished = MagicMock(ok=True)
+        mock_finished.json.return_value = [
+            {"id": "act-1", "activityId": "AdHocSubProcess_LoanAssessmentAgent", "endTime": "..."}
+        ]
+        with patch.object(client._session, "get", side_effect=[mock_empty, mock_finished]) as mock_get:
+            result = client.wait_for_activity_completion(
+                "abc-123", "AdHocSubProcess_LoanAssessmentAgent", poll_interval=0, timeout=5
+            )
+        assert result["activityId"] == "AdHocSubProcess_LoanAssessmentAgent"
+        _, kwargs = mock_get.call_args
+        assert kwargs["params"] == {
+            "processInstanceId": "abc-123",
+            "activityId": "AdHocSubProcess_LoanAssessmentAgent",
+            "finished": "true",
+        }
+
+    def test_raises_timeout_if_activity_never_finishes(self):
+        client = self._client()
+        mock_empty = MagicMock(ok=True)
+        mock_empty.json.return_value = []
+        with (
+            patch.object(client._session, "get", return_value=mock_empty),
+            pytest.raises(TimeoutError),
+        ):
+            client.wait_for_activity_completion(
+                "abc-123", "AdHocSubProcess_LoanAssessmentAgent", poll_interval=0, timeout=0.01
+            )
+
+
 # ---------------------------------------------------------------------------
 # mock_workers._make_handler
 # ---------------------------------------------------------------------------
