@@ -39,6 +39,8 @@ either a CLI flag or an `EVAL_SERVICE_<NAME>` environment variable:
 | Judge model URI     | `--judge-model`      | `EVAL_SERVICE_JUDGE_MODEL`      | `gateway:/fluxnova-judge`            |
 | Lock duration (ms)  | `--lock-duration-ms` | `EVAL_SERVICE_LOCK_DURATION_MS` | `180000` (judge calls can take 90s+) |
 | MLflow tracking URI | `--tracking-uri`     | `EVAL_SERVICE_TRACKING_URI`     | `http://localhost:5000`              |
+| Trace poll timeout (s) | `--trace-poll-timeout` | `EVAL_SERVICE_TRACE_POLL_TIMEOUT` | `30.0` (the collector delivers traces to MLflow asynchronously, so this retries the lookup) |
+| Trace poll interval (s) | `--trace-poll-interval` | `EVAL_SERVICE_TRACE_POLL_INTERVAL` | `3.0` |
 
 A CLI flag always wins over the matching env var, which always wins over the default.
 

@@ -51,6 +51,13 @@ DEFAULT_LOCK_DURATION_MS = 180_000
 # server process itself.
 DEFAULT_TRACKING_URI = "http://localhost:5000"
 
+# How long/often to retry looking up the run's trace in MLflow before giving up.
+# The OTel Collector delivers spans asynchronously, so this service task (which
+# runs immediately after the subprocess ends) can otherwise beat the trace's
+# arrival — see fluxnova_mlflow_dataset.traces.MlflowTraceReader.wait_for_trace.
+DEFAULT_TRACE_POLL_TIMEOUT_S = 30.0
+DEFAULT_TRACE_POLL_INTERVAL_S = 3.0
+
 
 @dataclass
 class EvalServiceConfig:
@@ -69,3 +76,5 @@ class EvalServiceConfig:
     judge_model: str = DEFAULT_JUDGE_MODEL
     lock_duration_ms: int = DEFAULT_LOCK_DURATION_MS
     tracking_uri: str = DEFAULT_TRACKING_URI
+    trace_poll_timeout: float = DEFAULT_TRACE_POLL_TIMEOUT_S
+    trace_poll_interval: float = DEFAULT_TRACE_POLL_INTERVAL_S

@@ -24,6 +24,7 @@ from camunda.external_task.external_task_worker import ExternalTaskWorker
 
 from eval_service_worker.config import EvalServiceConfig
 from eval_service_worker.scoring import NoFinalOutputError, score_process_instance
+from fluxnova_mlflow_dataset import TraceStoreError
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +59,24 @@ def make_handler(config: EvalServiceConfig):
                 process_key=config.process_key,
                 experiment_name=config.experiment_name,
                 judge_model=config.judge_model,
+                trace_poll_timeout=config.trace_poll_timeout,
+                trace_poll_interval=config.trace_poll_interval,
             )
         except NoFinalOutputError as exc:
             logger.warning("No output to score yet for %s: %s", process_instance_id, exc)
             return task.failure(
                 error_message="No final output available to score yet",
+                error_details=str(exc),
+                max_retries=_MAX_RETRIES,
+                retry_timeout=_RETRY_TIMEOUT_MS,
+            )
+        except TraceStoreError as exc:
+            # The internal poll in score_process_instance (config.trace_poll_timeout)
+            # already gave the collector a chance to deliver the trace — this is a
+            # backstop for slower deliveries, retried once more at the Camunda level.
+            logger.warning("Trace not yet available for %s: %s", process_instance_id, exc)
+            return task.failure(
+                error_message="Trace not yet available to score",
                 error_details=str(exc),
                 max_retries=_MAX_RETRIES,
                 retry_timeout=_RETRY_TIMEOUT_MS,

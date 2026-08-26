@@ -34,6 +34,10 @@ class _FakeTraceReader:
     def get_trace(self, process_instance_id: str):
         return f"trace-for-{process_instance_id}"
 
+    def wait_for_trace(self, process_instance_id: str, timeout: float, poll_interval: float):
+        return self.get_trace(process_instance_id)
+
+
 
 class _FakeRow:
     """Stands in for a ``pandas.Series`` row of ``result.tables['eval_results']``."""

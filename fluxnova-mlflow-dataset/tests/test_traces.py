@@ -286,3 +286,34 @@ class TestGetTraceId:
         reader = _reader(monkeypatch, traces)
         with pytest.raises(TraceStoreError, match="No traces found"):
             reader.get_trace_id("proc-123")
+
+
+class TestWaitForTrace:
+    def test_returns_immediately_when_trace_already_present(self, monkeypatch):
+        traces = [_trace(_span("invoke_agent", {"gen_ai.conversation.id": "proc-123"}), trace_id="tr-1")]
+        reader = _reader(monkeypatch, traces)
+        result = reader.wait_for_trace("proc-123", timeout=5, poll_interval=0)
+        assert result.info.trace_id == "tr-1"
+
+    def test_retries_until_trace_arrives(self, monkeypatch):
+        found = [_trace(_span("invoke_agent", {"gen_ai.conversation.id": "proc-123"}), trace_id="tr-1")]
+        calls = {"n": 0}
+
+        def _search():
+            calls["n"] += 1
+            return found if calls["n"] >= 3 else []
+
+        reader = MlflowTraceReader(tracking_uri="sqlite:///test.db", experiment_id="1")
+        monkeypatch.setattr(reader, "_search_traces", _search)
+        monkeypatch.setattr("fluxnova_mlflow_dataset.traces.time.sleep", lambda _: None)
+
+        result = reader.wait_for_trace("proc-123", timeout=5, poll_interval=0)
+
+        assert result.info.trace_id == "tr-1"
+        assert calls["n"] == 3
+
+    def test_raises_after_timeout_if_trace_never_arrives(self, monkeypatch):
+        reader = _reader(monkeypatch, [])
+        monkeypatch.setattr("fluxnova_mlflow_dataset.traces.time.sleep", lambda _: None)
+        with pytest.raises(TraceStoreError, match="No traces found"):
+            reader.wait_for_trace("proc-123", timeout=0, poll_interval=0)

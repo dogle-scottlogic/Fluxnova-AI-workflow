@@ -71,6 +71,21 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help=f"MLflow tracking server HTTP(S) URL (default: {defaults.tracking_uri})",
     )
     parser.add_argument(
+        "--trace-poll-timeout",
+        type=float,
+        default=float(_env("TRACE_POLL_TIMEOUT", str(defaults.trace_poll_timeout))),
+        help=(
+            "Max seconds to retry looking up the run's trace in MLflow before "
+            f"giving up (default: {defaults.trace_poll_timeout})"
+        ),
+    )
+    parser.add_argument(
+        "--trace-poll-interval",
+        type=float,
+        default=float(_env("TRACE_POLL_INTERVAL", str(defaults.trace_poll_interval))),
+        help=f"Seconds between trace lookup retries (default: {defaults.trace_poll_interval})",
+    )
+    parser.add_argument(
         "--log-level",
         default=_env("LOG_LEVEL", "INFO"),
         help="Python logging level (default: INFO)",
@@ -92,6 +107,8 @@ def main(argv: Iterable[str] | None = None) -> None:
         judge_model=args.judge_model,
         lock_duration_ms=args.lock_duration_ms,
         tracking_uri=args.tracking_uri,
+        trace_poll_timeout=args.trace_poll_timeout,
+        trace_poll_interval=args.trace_poll_interval,
     )
     run(
         config,

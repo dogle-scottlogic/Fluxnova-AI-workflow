@@ -8,7 +8,8 @@ a single Podman pod per service (`fluxnova-up.sh` / `fluxnova-down.sh` for Fluxn
 ## Prerequisites
 
 - **[Podman](https://podman.io/docs/installation)** installed, with a running machine/VM on Windows and macOS
-  (`podman machine init && podman machine start`) — not needed on Linux.
+  (`podman machine init && podman machine start`) — not needed on Linux. [Podman Desktop](https://podman-desktop.io)
+  is recommended, though not required, for a GUI to view/manage pods, containers, and logs.
 - **A locally built/loaded Fluxnova image** — this isn't published anywhere. Build it from the eval fork using the
   readme instructions (LINK TODO), or `podman load -i <fluxnova image tarball>`.
 - **The MLflow tracking server running** (either on the host — see the main README's "Running the MLflow tracking

@@ -69,6 +69,8 @@ def score_process_instance(
     process_key: str,
     experiment_name: str | None,
     judge_model: str,
+    trace_poll_timeout: float = 30.0,
+    trace_poll_interval: float = 3.0,
 ) -> EvalOutcome:
     """Fetch a completed subprocess run's trace from MLflow, run the
     ``decision_quality`` judge plus the deterministic scorers against it, and
@@ -81,11 +83,19 @@ def score_process_instance(
     driven solely by ``decision_quality`` (the only nondeterministic/judgement
     call among the scorers); the deterministic scorers are recorded for
     visibility, not (yet) wired into the BPMN gateway condition.
+
+    ``trace_poll_timeout``/``trace_poll_interval`` control how long to retry
+    looking up the trace before giving up — the OTel Collector delivers spans
+    to MLflow asynchronously, so this BPMN service task (which runs immediately
+    after the subprocess ends) can otherwise beat the trace's arrival.
     """
     mlflow.set_tracking_uri(tracking_uri)
     experiment = mlflow.set_experiment(experiment_name_for(process_key, experiment_name))
 
     reader = MlflowTraceReader(tracking_uri, experiment.experiment_id)
+    trace = reader.wait_for_trace(
+        process_instance_id, timeout=trace_poll_timeout, poll_interval=trace_poll_interval
+    )
     final_output = reader.get_final_output(process_instance_id)
     if not final_output:
         raise NoFinalOutputError(
@@ -93,7 +103,6 @@ def score_process_instance(
             "has the agentic subprocess actually completed and been exported to "
             "MLflow yet?"
         )
-    trace = reader.get_trace(process_instance_id)
 
     scorers = [decision_quality_judge(judge_model), *DETERMINISTIC_SCORERS]
     result = mlflow.genai.evaluate(data=[{"trace": trace}], scorers=scorers)

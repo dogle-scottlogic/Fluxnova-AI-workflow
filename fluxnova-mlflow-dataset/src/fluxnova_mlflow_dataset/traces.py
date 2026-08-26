@@ -13,6 +13,7 @@ reads (``gen_ai.*`` semantic-convention attributes on ``invoke_agent``,
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -197,6 +198,32 @@ class MlflowTraceReader:
             f"{self._experiment_id}. Has the collector delivered this run's traces "
             "to MLflow yet?"
         )
+
+    def wait_for_trace(
+        self,
+        correlation_id: str,
+        timeout: float = 30.0,
+        poll_interval: float = 3.0,
+    ) -> Any:
+        """Like :meth:`get_trace`, but retries for up to ``timeout`` seconds if no
+        trace is found yet.
+
+        The OTel Collector delivers a completed subprocess run's spans to MLflow
+        asynchronously — there's a short (usually a few seconds) window right
+        after the subprocess ends where a caller (e.g. the eval-service-worker's
+        BPMN service task, which runs immediately after) can be scored before the
+        trace has actually landed. Polling here closes that race without relying
+        on the caller's own retry/backoff (e.g. Camunda external-task retries).
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return self.get_trace(correlation_id)
+            except TraceStoreError:
+                if time.monotonic() >= deadline:
+                    raise
+                self._traces_cache = None  # force a fresh search on the next attempt
+                time.sleep(poll_interval)
 
     def get_trace_id(self, correlation_id: str) -> str:
         """Return the MLflow trace id (``tr-...``) containing this run's spans.

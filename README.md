@@ -92,6 +92,8 @@ treated as escape characters and silently mangle paths, e.g. `config\loan-assesm
 
 1. **Install prerequisites:**
    - [Podman](https://podman.io/docs/installation), then start its VM: `podman machine init && podman machine start`
+     ([Podman Desktop](https://podman-desktop.io) is recommended, though not required, for a GUI to view/manage pods,
+     containers, and logs)
    - Python 3.11+
    - [Ollama](https://ollama.com) with `llama3.2` pulled (`ollama pull llama3.2`) — the judge model used by both
      evaluation suites
@@ -151,11 +153,6 @@ Waiting for process to complete …
 Process 3816567e-9f94-11f1-9ead-94b609a26547 completed.
 Run 'mlflow-eval <config> --collect' to record the completed subprocess run into the MLflow evaluation dataset.
 ```
-
-`fluxnova-runner` **does not** write an agent-history report file itself (that responsibility moved to
-`fluxnova-mlflow-dataset`/`mlflow-eval`, per the Architecture diagram above) — copy the printed instance ID and use it
-in the next step.
-
 Other flags:
 
 ```bash
@@ -163,7 +160,7 @@ fluxnova-run --skip-deploy config/loan-assesment.yml   # BPMN already deployed
 fluxnova-run config/loan-assesment.yml                 # no mock workers (needs real service-task workers/backends)
 ```
 
-### Then evaluate that run with `mlflow-eval`
+### Then evaluate that run with `mlflow-eval` (This will become deprecated)
 
 Make sure the MLflow tracking server is running first (see "Running the MLflow tracking server" below) and the OTel
 Collector is exporting to it, then, still from `harness/`:
@@ -195,12 +192,10 @@ mlflow-eval config/loan-assesment.yml --collect --all
 mlflow-eval config/loan-assesment.yml --collect
 ```
 
-`mlflow-eval` only evaluates runs already recorded in the persistent MLflow dataset — there is no ad-hoc
-agent-history-report-file mode. Use `--collect` first (or on its own) to populate the dataset from MLflow's trace store
+`mlflow-eval` only evaluates runs already recorded in the persistent MLflow dataset. Use `--collect` first (or on its own) to populate the dataset from MLflow's trace store
 before evaluating.
 
-Each of these prints an aggregate metrics summary to the terminal (MLflow's own `EvaluationResult.metrics` — there is no
-bespoke report file) and writes full per-scorer results (scores, rationales, inputs/outputs) to a local SQLite tracking
+Each of these prints an aggregate metrics summary to the terminal (MLflow's own `EvaluationResult.metrics`) and writes full per-scorer results (scores, rationales, inputs/outputs) to a local SQLite tracking
 store at `harness/.mlflow/mlflow.db`.
 
 To view the results in the browser, use the same MLflow tracking server described in "Running the MLflow tracking
@@ -282,53 +277,7 @@ notes and the MLflow AI Gateway judge-endpoint setup.
 
 All harness and evaluation behaviour is driven by a single YAML file.
 
-```yaml
-fluxnova_url: http://localhost:8080/engine-rest
-bpmn_path: bpmn/loan-assesment.bpmn
-process_key: loanAssessmentProcess
-subprocess_id: AdHocSubProcess_LoanAssessmentAgent
-deployment_name: Loan Assessment
-
-# Initial process variables passed to the workflow
-variables:
-  applicantType: EMPLOYED
-  hasCollateral: false
-  requestedAmount: 50000
-  # ...
-
-# Mock external-task workers: topic → output variables
-mock_workers:
-  credit-score-check:
-    creditScore: 720
-  # ...
-
-# Tools available to the agent (BPMN element ID → display name)
-available_tools:
-  ServiceTask_CreditScoreCheck: Check Credit Score
-  # ...
-
-# Tools the agent is expected to call — GitLab CI-style rule list.
-# Rules are evaluated top-to-bottom against the run's inputVariables.
-# A rule without "if" always applies. Supported operators: == and !=
-expected_tools:
-  - tool: Check Credit Score
-  - tool: Run Fraud Screening
-  - tool: Assess Affordability
-  - if: '$applicantType == "EMPLOYED"'
-    tool: Verify Employment
-  - if: '$applicantType != "EMPLOYED"'
-    tool: Analyse Bank Statements
-  - if: '$hasCollateral == true'
-    tool: Value Collateral
-
-# Optional: also (or instead) record each completed run into a persistent
-# MLflow evaluation dataset — see "Recording runs into the MLflow dataset" above.
-mlflow_dataset:
-  enabled: false
-  # name: loan-assessment-runs
-  # tracking_uri: sqlite:///harness/.mlflow/mlflow.db
-  # also_write_json_report: true
-```
+[Example](harness/config/loan-assesment.yml)
 
 ### `expected_tools` rule syntax
 
@@ -381,21 +330,6 @@ The harness fetches this from the Fluxnova subprocess history endpoint and write
 }
 ```
 
-## Evaluation tests (DeepEval)
-
-| Test                                            | Metric                                     | Description                                                            |
-|-------------------------------------------------|--------------------------------------------|------------------------------------------------------------------------|
-| `test_tool_correctness`                         | `ToolCorrectnessMetric`                    | Agent calls all expected tools and no inappropriate ones               |
-| `test_tool_argument_correctness`                | `ToolCorrectnessMetric` (INPUT_PARAMETERS) | Each tool is invoked with the correct arguments from process variables |
-| `test_decision_quality`                         | `GEval`                                    | Final output contains a clear, justified APPROVE/REJECT recommendation |
-| `test_evidence_citation`                        | `GEval`                                    | Output cites the key financial data points gathered                    |
-| `test_output_matches_golden`                    | `GEval`                                    | Output reaches the same decision as the matching golden scenario       |
-| `test_no_collateral_check_when_no_collateral`   | Deterministic                              | Value Collateral is not called when `hasCollateral=false`              |
-| `test_no_bank_statement_for_employed_applicant` | Deterministic                              | Bank statements are not analysed for EMPLOYED applicants               |
-| `test_all_tool_calls_completed`                 | Deterministic                              | Every initiated tool call reached COMPLETED status                     |
-| `test_step_efficiency`                          | Deterministic                              | Agent completes within ≤ 3 loop iterations                             |
-| `test_requested_amount_passed_to_affordability` | Deterministic                              | Affordability tool receives the correct `requestedAmount`              |
-
 ## Evaluation scorers (MLflow)
 
 `harness/src/mlflow_eval/main.py` covers the same scenarios as the DeepEval suite above, plus a few extra checks added
@@ -416,6 +350,23 @@ after reviewing the BPMN's agent prompt and tool wiring:
 | `step_efficiency`                                     | Code       | Agent completes within a budget of loop iterations (+1 if collateral required)  |
 | `requested_amount_passed_to_affordability`            | Code       | Affordability tool receives the correct `customerId` and `requestedAmount`      |
 | `affordability_called_after_income_confirmed`         | Code (new) | Affordability is assessed only after income has been confirmed                  |
+
+
+## Evaluation tests (DeepEval)
+
+| Test                                            | Metric                                     | Description                                                            |
+|-------------------------------------------------|--------------------------------------------|------------------------------------------------------------------------|
+| `test_tool_correctness`                         | `ToolCorrectnessMetric`                    | Agent calls all expected tools and no inappropriate ones               |
+| `test_tool_argument_correctness`                | `ToolCorrectnessMetric` (INPUT_PARAMETERS) | Each tool is invoked with the correct arguments from process variables |
+| `test_decision_quality`                         | `GEval`                                    | Final output contains a clear, justified APPROVE/REJECT recommendation |
+| `test_evidence_citation`                        | `GEval`                                    | Output cites the key financial data points gathered                    |
+| `test_output_matches_golden`                    | `GEval`                                    | Output reaches the same decision as the matching golden scenario       |
+| `test_no_collateral_check_when_no_collateral`   | Deterministic                              | Value Collateral is not called when `hasCollateral=false`              |
+| `test_no_bank_statement_for_employed_applicant` | Deterministic                              | Bank statements are not analysed for EMPLOYED applicants               |
+| `test_all_tool_calls_completed`                 | Deterministic                              | Every initiated tool call reached COMPLETED status                     |
+| `test_step_efficiency`                          | Deterministic                              | Agent completes within ≤ 3 loop iterations                             |
+| `test_requested_amount_passed_to_affordability` | Deterministic                              | Affordability tool receives the correct `requestedAmount`              |
+
 
 ## Tech stack
 

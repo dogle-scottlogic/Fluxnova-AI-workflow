@@ -15,6 +15,8 @@ class TestParseArgs:
             "EVAL_SERVICE_JUDGE_MODEL",
             "EVAL_SERVICE_LOCK_DURATION_MS",
             "EVAL_SERVICE_TRACKING_URI",
+            "EVAL_SERVICE_TRACE_POLL_TIMEOUT",
+            "EVAL_SERVICE_TRACE_POLL_INTERVAL",
         ):
             monkeypatch.delenv(name, raising=False)
 
@@ -24,6 +26,8 @@ class TestParseArgs:
         assert args.tracking_uri == "http://localhost:5000"
         assert args.topic == "agent-output-eval"
         assert args.lock_duration_ms == 180_000
+        assert args.trace_poll_timeout == 30.0
+        assert args.trace_poll_interval == 3.0
 
     def test_cli_flags_override_defaults(self):
         args = main_module.parse_args(
