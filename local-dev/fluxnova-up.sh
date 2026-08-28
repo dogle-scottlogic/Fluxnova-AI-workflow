@@ -29,8 +29,6 @@ fi
 FLUXNOVA_IMAGE="${FLUXNOVA_IMAGE:-fluxnova:local}"
 FLUXNOVA_PORT="${FLUXNOVA_PORT:-8080}"
 OTEL_COLLECTOR_IMAGE="${OTEL_COLLECTOR_IMAGE:-docker.io/otel/opentelemetry-collector-contrib:latest}"
-FLUXNOVA_OTEL_USERLIB_DIR="${FLUXNOVA_OTEL_USERLIB_DIR:-../../fluxnova-bpm-platform/local/configuration/userlib}"
-USERLIB_DIR_RESOLVED="$(cd "$FLUXNOVA_OTEL_USERLIB_DIR" && pwd)"
 DEV_NETWORK="${DEV_NETWORK:-fluxnova-dev}"
 # The numeric MLflow experiment ID traces get sent to — MLflow's OTLP endpoint requires
 # this on every request (see otel-collector-config.yaml). Must already exist; see
@@ -68,7 +66,6 @@ podman run -d --pod "$POD_NAME" --name fluxnova \
   -e OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317 \
   -e OTEL_EXPORTER_OTLP_PROTOCOL=grpc \
   -v "$(pwd)/default.yml:/fluxnova/configuration/default.yml:ro" \
-  -v "${USERLIB_DIR_RESOLVED}:/fluxnova/configuration/userlib:ro" \
   "$FLUXNOVA_IMAGE"
 
 # Wait for Fluxnova to become reachable via localhost, then fall back to the Podman

@@ -10,8 +10,8 @@ a single Podman pod per service (`fluxnova-up.sh` / `fluxnova-down.sh` for Fluxn
 - **[Podman](https://podman.io/docs/installation)** installed, with a running machine/VM on Windows and macOS
   (`podman machine init && podman machine start`) — not needed on Linux. [Podman Desktop](https://podman-desktop.io)
   is recommended, though not required, for a GUI to view/manage pods, containers, and logs.
-- **A locally built/loaded Fluxnova image** — this isn't published anywhere. Build it from the eval fork using the
-  readme instructions (LINK TODO), or `podman load -i <fluxnova image tarball>`.
+- **The Fluxnova image**, pulled from GitHub Container Registry — see "Fluxnova image" below. `podman run` (used by
+  `fluxnova-up.sh`) pulls it automatically the first time if it isn't already present locally.
 - **The MLflow tracking server running** (either on the host — see the main README's "Running the MLflow tracking
   server" — or as the `mlflow-local` pod below) — the OTel Collector sends traces to it via `host.containers.internal`.
 
@@ -22,7 +22,7 @@ the main README's "A note on shells (Windows)").
 
 ```bash
 cd local-dev
-# adjust .env: set FLUXNOVA_IMAGE to your locally built/loaded Fluxnova image
+# adjust .env if needed — FLUXNOVA_IMAGE defaults to the public GHCR image (see "Fluxnova image" below)
 
 ./fluxnova-up.sh      # start the pod
 ./fluxnova-down.sh    # stop and remove it
@@ -41,6 +41,25 @@ Both containers share one network namespace, so they reach each other via `local
 
 See `default.yml` and `otel-collector-config.yaml` for details and adjust image names, ports, or the collector
 pipeline as your actual Fluxnova image requires.
+
+### Fluxnova image
+
+`FLUXNOVA_IMAGE` in `.env` points at a versioned image on GitHub Container Registry (GHCR):
+`ghcr.io/dogle-scottlogic/fluxnova-edd-platform:<tag>`. The package is **public**, so `podman run` (via
+`fluxnova-up.sh`) pulls it automatically on first use with no login required — you don't need to build it yourself
+for normal local dev.
+
+**Publishing a new version:** the Fluxnova image is built from the separate `fluxnova-bpm-platform` source (not this
+repo). After building it locally there (`podman build -t fluxnova-edd-platform:<new-tag> .`), tag and push it to GHCR:
+
+```bash
+podman login ghcr.io -u <github-username>   # needs classic PAT with write:packages (+ repo if private)
+podman tag fluxnova-edd-platform:<new-tag> ghcr.io/dogle-scottlogic/fluxnova-edd-platform:<new-tag>
+podman push ghcr.io/dogle-scottlogic/fluxnova-edd-platform:<new-tag>
+```
+
+Then bump `FLUXNOVA_IMAGE` in `.env` (and this README's example tag above, if it's a new default) to the new tag so
+everyone picks it up.
 
 Once Fluxnova responds, `fluxnova-up.sh` opens the Fluxnova web UI (`/fluxnova-welcome/index.html`) in your default
 browser automatically — same behaviour as `mlflow-up.sh` below, including the `localhost`-unreachable fallback
